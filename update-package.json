@@ -1,0 +1,16 @@
+{
+  "name": "Evil's Media Optimizer",
+  "version": "4.0.0",
+  "minimum_updater_version": "4.0.0",
+  "architecture": "modular",
+  "notes": [
+    "Introduces the emo Python package.",
+    "Thin application entrypoint.",
+    "Working Help, Settings and Updates quick bar.",
+    "Generic Scan wording.",
+    "Functional Dashboard, Movies and Queue navigation.",
+    "File-by-file updater with retries.",
+    "Updater no longer deletes the assets folder.",
+    "Rollback backup retained."
+  ]
+}
