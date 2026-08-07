@@ -1,15 +1,16 @@
 {
   "name": "Evil's Media Optimizer",
-  "version": "4.1.0",
+  "version": "4.3.0",
   "minimum_updater_version": "4.0.0",
   "architecture": "modular",
   "notes": [
-    "Adds the Operations Center dashboard.",
-    "Shows NAS, Jellyfin, GPU and HandBrake health.",
-    "Shows movies, queue, potential saving and free NAS space.",
-    "Adds dashboard Scan and Start Process actions.",
-    "Adds current movie and remaining count to live telemetry.",
-    "Adds a live VRAM graph.",
-    "Synchronizes dashboard status during scans and processing."
+    "Adds the Queue Control Centre.",
+    "Adds drag-and-drop ordering and queue statistics.",
+    "Adds move top, bottom, up and down controls.",
+    "Adds sorting by title or potential saving.",
+    "Adds remove and clear queue controls.",
+    "Adds Pause After Current for safe queue pausing.",
+    "Adds a brief completion summary between movies.",
+    "Removes the baked-in Help and Settings symbols from the banner."
   ]
 }

@@ -39,6 +39,7 @@ CONFIG_FILE = APP_DIR / "config.json"
 HISTORY_FILE = APP_DIR / "history.json"
 LOG_FILE = APP_DIR / "evils_media_optimizer.log"
 POSTER_CACHE = APP_DIR / "cache" / "posters"
+INTELLIGENCE_CACHE = APP_DIR / "cache" / "library_intelligence.json"
 POSTER_CACHE.mkdir(parents=True, exist_ok=True)
 
 DEFAULT_CONFIG = {
@@ -56,6 +57,7 @@ DEFAULT_CONFIG = {
     "update_manifest_url": "",
     "queue_finish_action": "Do nothing",
     "show_live_telemetry": True,
+    "analyze_media_on_scan": True,
 }
 VIDEO_EXTENSIONS = {".mkv", ".mp4", ".m4v", ".avi", ".mov", ".ts", ".m2ts", ".webm"}
 
@@ -72,6 +74,21 @@ def load_config() -> dict:
 
 def save_config(config: dict) -> None:
     CONFIG_FILE.write_text(json.dumps(config, indent=2), encoding="utf-8")
+
+
+def hidden_process_kwargs() -> dict:
+    """Return subprocess options that suppress console windows on Windows."""
+    if os.name != "nt":
+        return {}
+
+    startupinfo = subprocess.STARTUPINFO()
+    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    startupinfo.wShowWindow = 0
+
+    return {
+        "startupinfo": startupinfo,
+        "creationflags": subprocess.CREATE_NO_WINDOW,
+    }
 
 
 def log(message: str) -> None:
@@ -307,6 +324,57 @@ def test_jellyfin(config: dict) -> tuple[bool, str]:
         return False, str(exc)
 
 
+def format_runtime(seconds: float) -> str:
+    if seconds <= 0:
+        return "Unknown"
+    total = int(seconds)
+    hours, remainder = divmod(total, 3600)
+    minutes, secs = divmod(remainder, 60)
+    if hours:
+        return f"{hours}h {minutes:02d}m"
+    return f"{minutes}m {secs:02d}s"
+
+
+def normalize_movie_title(value: str) -> str:
+    title, _year = split_title_year(value)
+    cleaned = re.sub(
+        r"\b(2160p|1080p|720p|4k|uhd|bluray|blu-ray|webrip|web-dl|remux|x264|x265|hevc|h264)\b",
+        " ",
+        title,
+        flags=re.IGNORECASE,
+    )
+    return re.sub(r"[^a-z0-9]+", "", cleaned.casefold())
+
+
+def load_intelligence_cache() -> dict:
+    try:
+        if INTELLIGENCE_CACHE.exists():
+            payload = json.loads(
+                INTELLIGENCE_CACHE.read_text(encoding="utf-8")
+            )
+            if isinstance(payload, dict):
+                return payload
+    except Exception as exc:
+        log(f"Could not load intelligence cache: {exc}")
+    return {}
+
+
+def save_intelligence_cache(payload: dict) -> None:
+    try:
+        INTELLIGENCE_CACHE.parent.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+        temporary = INTELLIGENCE_CACHE.with_suffix(".tmp")
+        temporary.write_text(
+            json.dumps(payload, indent=2),
+            encoding="utf-8",
+        )
+        temporary.replace(INTELLIGENCE_CACHE)
+    except Exception as exc:
+        log(f"Could not save intelligence cache: {exc}")
+
+
 @dataclass
 class Movie:
     path: Path
@@ -315,6 +383,19 @@ class Movie:
     queued: bool = False
     selected: bool = False
     status: str = "Ready"
+    duration_seconds: float = 0.0
+    video_codec: str = ""
+    video_profile: str = ""
+    width: int = 0
+    height: int = 0
+    pix_fmt: str = ""
+    hdr_format: str = ""
+    audio_codec: str = ""
+    audio_channels: int = 0
+    subtitle_count: int = 0
+    overall_bitrate: int = 0
+    metadata_status: str = "Pending"
+    duplicate_count: int = 0
 
     @property
     def title(self) -> str:
@@ -322,15 +403,178 @@ class Movie:
 
     @property
     def saving(self) -> int:
-        return max(0, self.size - int(self.target_gib * 1024**3))
+        return max(
+            0,
+            self.size - int(self.target_gib * 1024**3),
+        )
 
     @property
     def saving_percent(self) -> int:
-        return int(self.saving / self.size * 100) if self.size else 0
+        return (
+            int(self.saving / self.size * 100)
+            if self.size
+            else 0
+        )
+
+    @property
+    def runtime_text(self) -> str:
+        return format_runtime(self.duration_seconds)
+
+    @property
+    def resolution_text(self) -> str:
+        if self.height >= 2100 or self.width >= 3800:
+            return "2160p"
+        if self.height >= 1400:
+            return "1440p"
+        if self.height >= 1000:
+            return "1080p"
+        if self.height >= 700:
+            return "720p"
+        if self.height:
+            return f"{self.height}p"
+        return "Unknown"
+
+    @property
+    def video_text(self) -> str:
+        labels = {
+            "hevc": "HEVC",
+            "h265": "HEVC",
+            "h264": "H.264",
+            "av1": "AV1",
+            "mpeg2video": "MPEG-2",
+            "vc1": "VC-1",
+            "vp9": "VP9",
+        }
+        codec = labels.get(
+            self.video_codec.casefold(),
+            self.video_codec.upper()
+            if self.video_codec
+            else "Unknown",
+        )
+        pieces = [codec, self.resolution_text]
+        if self.hdr_format:
+            pieces.append(self.hdr_format)
+        return " • ".join(piece for piece in pieces if piece)
+
+    @property
+    def audio_text(self) -> str:
+        labels = {
+            "aac": "AAC",
+            "ac3": "AC-3",
+            "eac3": "E-AC-3",
+            "dts": "DTS",
+            "truehd": "TrueHD",
+            "flac": "FLAC",
+        }
+        codec = labels.get(
+            self.audio_codec.casefold(),
+            self.audio_codec.upper()
+            if self.audio_codec
+            else "Unknown",
+        )
+        if self.audio_channels:
+            return f"{codec} • {self.audio_channels} ch"
+        return codec
+
+    @property
+    def recommendation(self) -> tuple[str, str]:
+        saving_gib = self.saving / 1024**3
+        codec = self.video_codec.casefold()
+
+        if (
+            self.saving <= 1024**3
+            or self.target_gib * 1024**3 >= self.size
+        ):
+            return "SKIP", "Very little space would be recovered."
+
+        if self.saving_percent >= 70 and saving_gib >= 15:
+            return (
+                "HIGH VALUE",
+                "Large potential saving at your selected manual target.",
+            )
+
+        if (
+            codec in {"h264", "mpeg2video", "vc1", "mpeg4"}
+            and saving_gib >= 5
+        ):
+            return (
+                "GOOD CANDIDATE",
+                f"{self.video_text} should benefit from NVENC HEVC.",
+            )
+
+        if codec in {"hevc", "h265", "av1", "vp9"}:
+            if self.saving_percent < 45:
+                return (
+                    "ALREADY EFFICIENT",
+                    "Modern codec with a smaller expected benefit.",
+                )
+            return (
+                "REVIEW",
+                "Modern codec, but your manual target still saves space.",
+            )
+
+        if saving_gib >= 3:
+            return (
+                "MODERATE",
+                "Worth considering based on your chosen target.",
+            )
+
+        return "LOW VALUE", "Only a small saving is expected."
+
+    def apply_metadata(self, payload: dict) -> None:
+        self.duration_seconds = float(
+            payload.get("duration_seconds", 0) or 0
+        )
+        self.video_codec = str(
+            payload.get("video_codec", "") or ""
+        )
+        self.video_profile = str(
+            payload.get("video_profile", "") or ""
+        )
+        self.width = int(payload.get("width", 0) or 0)
+        self.height = int(payload.get("height", 0) or 0)
+        self.pix_fmt = str(payload.get("pix_fmt", "") or "")
+        self.hdr_format = str(
+            payload.get("hdr_format", "") or ""
+        )
+        self.audio_codec = str(
+            payload.get("audio_codec", "") or ""
+        )
+        self.audio_channels = int(
+            payload.get("audio_channels", 0) or 0
+        )
+        self.subtitle_count = int(
+            payload.get("subtitle_count", 0) or 0
+        )
+        self.overall_bitrate = int(
+            payload.get("overall_bitrate", 0) or 0
+        )
+        self.metadata_status = str(
+            payload.get("metadata_status", "Ready")
+        )
+
+    def metadata_payload(self) -> dict:
+        return {
+            "duration_seconds": self.duration_seconds,
+            "video_codec": self.video_codec,
+            "video_profile": self.video_profile,
+            "width": self.width,
+            "height": self.height,
+            "pix_fmt": self.pix_fmt,
+            "hdr_format": self.hdr_format,
+            "audio_codec": self.audio_codec,
+            "audio_channels": self.audio_channels,
+            "subtitle_count": self.subtitle_count,
+            "overall_bitrate": self.overall_bitrate,
+            "metadata_status": self.metadata_status,
+        }
 
     def poster_path(self) -> Path | None:
         candidates = (
-            "poster.jpg", "poster.png", "folder.jpg", "folder.png",
+            "poster.jpg",
+            "poster.png",
+            "folder.jpg",
+            "folder.png",
             f"{self.path.parent.name}-poster.jpg",
         )
         for name in candidates:
@@ -341,7 +585,8 @@ class Movie:
             for candidate in self.path.parent.iterdir():
                 if (
                     candidate.is_file()
-                    and candidate.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp"}
+                    and candidate.suffix.lower()
+                    in {".jpg", ".jpeg", ".png", ".webp"}
                     and "trickplay" not in candidate.name.lower()
                     and "fanart" not in candidate.name.lower()
                     and "backdrop" not in candidate.name.lower()
@@ -448,6 +693,185 @@ class PosterPrefetchWorker(QRunnable):
             self.signals.failed.emit(str(exc))
 
 
+class MetadataWorker(QRunnable):
+    def __init__(
+        self,
+        movies: list[Movie],
+        config: dict,
+    ):
+        super().__init__()
+        self.movies = list(movies)
+        self.config = config.copy()
+        self.signals = Signals()
+
+    def cache_key(self, movie: Movie) -> str:
+        try:
+            modified = movie.path.stat().st_mtime_ns
+        except OSError:
+            modified = 0
+        raw = f"{movie.path}|{movie.size}|{modified}"
+        return hashlib.sha256(
+            raw.encode("utf-8")
+        ).hexdigest()
+
+    def inspect_movie(self, movie: Movie) -> dict:
+        command = [
+            self.config.get("ffprobe", "ffprobe"),
+            "-v",
+            "error",
+            "-show_format",
+            "-show_streams",
+            "-of",
+            "json",
+            str(movie.path),
+        ]
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=90,
+            check=False,
+            **hidden_process_kwargs(),
+        )
+        if result.returncode != 0:
+            raise RuntimeError(
+                result.stderr.strip()
+                or "ffprobe could not inspect this movie."
+            )
+
+        data = json.loads(result.stdout)
+        streams = data.get("streams", [])
+        format_data = data.get("format", {})
+
+        videos = [
+            stream
+            for stream in streams
+            if stream.get("codec_type") == "video"
+            and not stream.get("disposition", {}).get(
+                "attached_pic",
+                0,
+            )
+        ]
+        audios = [
+            stream
+            for stream in streams
+            if stream.get("codec_type") == "audio"
+        ]
+        subtitles = [
+            stream
+            for stream in streams
+            if stream.get("codec_type") == "subtitle"
+        ]
+
+        video = videos[0] if videos else {}
+        audio = audios[0] if audios else {}
+        transfer = str(
+            video.get("color_transfer", "")
+        ).casefold()
+        pix_fmt = str(video.get("pix_fmt", "") or "")
+        hdr_format = ""
+
+        if transfer == "smpte2084":
+            hdr_format = "HDR10"
+        elif transfer == "arib-std-b67":
+            hdr_format = "HLG"
+        elif "dvhe" in str(
+            video.get("codec_tag_string", "")
+        ).casefold():
+            hdr_format = "Dolby Vision"
+        elif any(
+            token in pix_fmt.casefold()
+            for token in (
+                "p10",
+                "10le",
+                "10be",
+                "12le",
+                "12be",
+            )
+        ):
+            hdr_format = "10-bit"
+
+        return {
+            "duration_seconds": float(
+                format_data.get("duration", 0) or 0
+            ),
+            "video_codec": video.get("codec_name", "") or "",
+            "video_profile": video.get("profile", "") or "",
+            "width": int(video.get("width", 0) or 0),
+            "height": int(video.get("height", 0) or 0),
+            "pix_fmt": pix_fmt,
+            "hdr_format": hdr_format,
+            "audio_codec": audio.get("codec_name", "") or "",
+            "audio_channels": int(
+                audio.get("channels", 0) or 0
+            ),
+            "subtitle_count": len(subtitles),
+            "overall_bitrate": int(
+                format_data.get("bit_rate", 0) or 0
+            ),
+            "metadata_status": "Ready",
+        }
+
+    def run(self):
+        try:
+            ffprobe = self.config.get("ffprobe", "ffprobe")
+            if shutil.which(ffprobe) is None:
+                raise FileNotFoundError(
+                    f"{ffprobe} was not found in PATH."
+                )
+
+            cache = load_intelligence_cache()
+            updated_cache = dict(cache)
+            analyzed = 0
+            cached_count = 0
+            failed = 0
+            total = len(self.movies)
+
+            for index, movie in enumerate(self.movies, 1):
+                key = self.cache_key(movie)
+                payload = cache.get(key)
+
+                if isinstance(payload, dict):
+                    movie.apply_metadata(payload)
+                    cached_count += 1
+                else:
+                    try:
+                        payload = self.inspect_movie(movie)
+                        movie.apply_metadata(payload)
+                        updated_cache[key] = payload
+                        analyzed += 1
+                    except Exception as exc:
+                        movie.metadata_status = "Failed"
+                        failed += 1
+                        log(
+                            f"Metadata failed for {movie.path}: {exc}"
+                        )
+
+                percent = (
+                    int(index / total * 100)
+                    if total
+                    else 100
+                )
+                self.signals.progress.emit(
+                    percent,
+                    f"Analyzing {index}/{total}: {movie.title}",
+                )
+
+            save_intelligence_cache(updated_cache)
+            self.signals.finished.emit(
+                {
+                    "analyzed": analyzed,
+                    "cached": cached_count,
+                    "failed": failed,
+                    "total": total,
+                }
+            )
+        except Exception as exc:
+            self.signals.failed.emit(str(exc))
+
+
 class EncodeWorker(QRunnable):
     def __init__(self, movie: Movie, config: dict):
         super().__init__()
@@ -470,10 +894,24 @@ class EncodeWorker(QRunnable):
             dst.flush(); os.fsync(dst.fileno())
 
     def duration(self, source: Path) -> float:
-        result = subprocess.run([
-            self.config["ffprobe"], "-v", "error", "-show_entries", "format=duration",
-            "-of", "default=noprint_wrappers=1:nokey=1", str(source)
-        ], capture_output=True, text=True, encoding="utf-8", errors="replace", check=False)
+        result = subprocess.run(
+            [
+                self.config["ffprobe"],
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+                str(source),
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+            **hidden_process_kwargs(),
+        )
         if result.returncode != 0:
             raise RuntimeError(result.stderr.strip() or "ffprobe could not read the movie duration.")
         value = float(result.stdout.strip())
@@ -483,8 +921,16 @@ class EncodeWorker(QRunnable):
 
     def run_handbrake(self, command: list[str]) -> None:
         log("Running: " + subprocess.list2cmdline(command))
-        process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                   text=True, encoding="utf-8", errors="replace", bufsize=1)
+        process = subprocess.Popen(
+            command,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            bufsize=1,
+            **hidden_process_kwargs(),
+        )
         assert process.stdout is not None
         for raw in process.stdout:
             line = raw.rstrip()
@@ -595,6 +1041,24 @@ class SparklineWidget(QWidget):
         self.setMinimumHeight(82)
         self.setMaximumHeight(82)
 
+    def set_metric(
+        self,
+        title: str,
+        unit: str,
+        maximum: float | None = None,
+    ):
+        changed = (
+            self.title != title
+            or self.unit != unit
+            or self.maximum != maximum
+        )
+        self.title = title
+        self.unit = unit
+        self.maximum = maximum
+        if changed:
+            self.clear_values()
+        self.update()
+
     def set_value(self, value: float):
         self.current_value = max(0.0, float(value))
         self.values.append(self.current_value)
@@ -701,19 +1165,25 @@ class LiveTelemetryPanel(QFrame):
         self.setVisible(False)
 
         self.stage_name = "idle"
+        self.verification_pulse = 0
+        self.verification_direction = 1
+
         self.timer = QTimer(self)
         self.timer.setInterval(1000)
         self.timer.timeout.connect(self.sample)
 
         self.previous_network = None
+        self.previous_network_by_adapter = {}
         self.previous_time = None
+        self.active_adapter = ""
+        self.network_available = psutil is not None
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(11, 8, 11, 9)
         layout.setSpacing(6)
 
         heading_row = QHBoxLayout()
-        self.heading = QLabel("LIVE PROCESS TELEMETRY")
+        self.heading = QLabel("LIVE PROCESS")
         self.heading.setObjectName("telemetryHeading")
         heading_row.addWidget(self.heading)
 
@@ -726,38 +1196,21 @@ class LiveTelemetryPanel(QFrame):
         heading_row.addWidget(self.stage_label)
         layout.addLayout(heading_row)
 
-        graph_row = QHBoxLayout()
-        graph_row.setSpacing(7)
-
-        self.gpu_graph = SparklineWidget(
-            "GPU USAGE",
+        self.active_graph = SparklineWidget(
+            "WAITING",
             "%",
             maximum=100,
         )
-        self.temperature_graph = SparklineWidget(
-            "GPU TEMP",
-            "°C",
-            maximum=100,
-        )
-        self.vram_graph = SparklineWidget(
-            "VRAM USED",
-            "GB",
-        )
-        self.network_down_graph = SparklineWidget(
-            "NAS DOWNLOAD",
-            "MB/s",
-        )
-        self.network_up_graph = SparklineWidget(
-            "NAS UPLOAD",
-            "MB/s",
-        )
+        self.active_graph.setMinimumHeight(92)
+        self.active_graph.setMaximumHeight(92)
+        layout.addWidget(self.active_graph)
 
-        graph_row.addWidget(self.gpu_graph, 1)
-        graph_row.addWidget(self.temperature_graph, 1)
-        graph_row.addWidget(self.vram_graph, 1)
-        graph_row.addWidget(self.network_down_graph, 1)
-        graph_row.addWidget(self.network_up_graph, 1)
-        layout.addLayout(graph_row)
+        self.secondary_status = QLabel("")
+        self.secondary_status.setObjectName("telemetrySecondary")
+        self.secondary_status.setAlignment(
+            Qt.AlignmentFlag.AlignCenter
+        )
+        layout.addWidget(self.secondary_status)
 
     def set_current_job(
         self,
@@ -771,15 +1224,70 @@ class LiveTelemetryPanel(QFrame):
     def begin_stage(self, stage: str):
         self.stage_name = stage
         labels = {
-            "download": "NAS → PC",
+            "download": "VAULTONE → PC",
             "encoding": "NVENC ENCODING",
-            "upload": "PC → NAS",
+            "upload": "PC → VAULTONE",
             "verifying": "VERIFYING",
             "complete": "COMPLETE",
         }
         self.stage_label.setText(
             labels.get(stage, stage.upper())
         )
+
+        if stage == "download":
+            self.active_graph.set_metric(
+                "DOWNLOAD TO PC",
+                "MB/s",
+                None,
+            )
+            self.secondary_status.setText(
+                "Preparing to read the original movie from VaultOne"
+            )
+            self.reset_network_baseline()
+
+        elif stage == "encoding":
+            self.active_graph.set_metric(
+                "VIDEO ENCODE",
+                "%",
+                100,
+            )
+            self.secondary_status.setText(
+                "Dedicated NVIDIA Video Encode engine"
+            )
+
+        elif stage == "upload":
+            self.active_graph.set_metric(
+                "UPLOAD FROM PC",
+                "MB/s",
+                None,
+            )
+            self.secondary_status.setText(
+                "Preparing to write the optimized movie back to VaultOne"
+            )
+            self.reset_network_baseline()
+
+        elif stage == "verifying":
+            self.active_graph.set_metric(
+                "VERIFICATION",
+                "%",
+                100,
+            )
+            self.secondary_status.setText(
+                "Checking the copied file before replacement"
+            )
+            self.verification_pulse = 12
+            self.verification_direction = 1
+
+        elif stage == "complete":
+            self.active_graph.set_metric(
+                "COMPLETE",
+                "%",
+                100,
+            )
+            self.active_graph.set_value(100)
+            self.secondary_status.setText(
+                "Movie processing completed successfully"
+            )
 
         if stage in {
             "download",
@@ -789,26 +1297,44 @@ class LiveTelemetryPanel(QFrame):
         }:
             self.setVisible(True)
             if not self.timer.isActive():
-                self.reset_network_baseline()
                 self.timer.start()
             self.sample()
         elif stage == "complete":
             self.setVisible(True)
+            self.timer.stop()
             QTimer.singleShot(2500, self.stop_and_hide)
 
     def reset_network_baseline(self):
         self.previous_time = time.monotonic()
-        if psutil is not None:
-            self.previous_network = psutil.net_io_counters()
-        else:
+        self.active_adapter = ""
+
+        if psutil is None:
+            self.network_available = False
             self.previous_network = None
+            self.previous_network_by_adapter = {}
+            self.secondary_status.setText(
+                "Network telemetry unavailable — install psutil"
+            )
+            return
+
+        self.network_available = True
+        self.previous_network = psutil.net_io_counters()
+        self.previous_network_by_adapter = (
+            psutil.net_io_counters(pernic=True)
+        )
 
     def nvidia_metrics(self) -> tuple[float, float, float]:
+        """
+        Return dedicated Video Encode %, general GPU %, and temperature.
+
+        Task Manager's Video Encode graph reports a dedicated engine, so
+        utilization.encoder is the primary reading during NVENC work.
+        """
         try:
             result = subprocess.run(
                 [
                     "nvidia-smi",
-                    "--query-gpu=utilization.gpu,temperature.gpu,memory.used",
+                    "--query-gpu=utilization.encoder,utilization.gpu,temperature.gpu",
                     "--format=csv,noheader,nounits",
                 ],
                 capture_output=True,
@@ -823,53 +1349,199 @@ class LiveTelemetryPanel(QFrame):
                 ),
                 check=False,
             )
-            if result.returncode != 0:
-                return 0.0, 0.0, 0.0
-
-            first_line = result.stdout.strip().splitlines()[0]
-            usage, temperature, memory_mib = [
-                float(part.strip())
-                for part in first_line.split(",")[:3]
-            ]
-            return usage, temperature, memory_mib / 1024
+            if result.returncode == 0 and result.stdout.strip():
+                values = [
+                    float(part.strip())
+                    for part in result.stdout.strip().splitlines()[0].split(",")[:3]
+                ]
+                if len(values) == 3:
+                    return values[0], values[1], values[2]
         except Exception:
-            return 0.0, 0.0, 0.0
+            pass
 
-    def network_metrics(self) -> tuple[float, float]:
+        # Fallback to nvidia-smi dmon. Its "enc" column is the dedicated
+        # encoder engine percentage on supported NVIDIA drivers.
+        try:
+            result = subprocess.run(
+                ["nvidia-smi", "dmon", "-s", "u", "-c", "1"],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=4,
+                creationflags=(
+                    subprocess.CREATE_NO_WINDOW
+                    if os.name == "nt"
+                    else 0
+                ),
+                check=False,
+            )
+            data_lines = [
+                line
+                for line in result.stdout.splitlines()
+                if line.strip()
+                and not line.lstrip().startswith("#")
+            ]
+            if data_lines:
+                columns = data_lines[-1].split()
+                # gpu, sm, mem, enc, dec, jpg, ofa
+                if len(columns) >= 5:
+                    general = float(columns[1])
+                    encoder = float(columns[3])
+                    return encoder, general, 0.0
+        except Exception:
+            pass
+
+        return 0.0, 0.0, 0.0
+
+    def network_metrics(
+        self,
+    ) -> tuple[float, float, str]:
         if psutil is None:
-            return 0.0, 0.0
+            self.network_available = False
+            return 0.0, 0.0, ""
 
         current_time = time.monotonic()
-        current = psutil.net_io_counters()
+        current_by_adapter = psutil.net_io_counters(
+            pernic=True
+        )
 
-        if self.previous_network is None or self.previous_time is None:
-            self.previous_network = current
+        if (
+            not self.previous_network_by_adapter
+            or self.previous_time is None
+        ):
+            self.previous_network_by_adapter = (
+                current_by_adapter
+            )
             self.previous_time = current_time
-            return 0.0, 0.0
+            return 0.0, 0.0, self.active_adapter
 
-        elapsed = max(0.1, current_time - self.previous_time)
+        elapsed = max(
+            0.1,
+            current_time - self.previous_time,
+        )
 
-        download = (
-            current.bytes_recv - self.previous_network.bytes_recv
-        ) / elapsed / (1024 * 1024)
-        upload = (
-            current.bytes_sent - self.previous_network.bytes_sent
-        ) / elapsed / (1024 * 1024)
+        ignored_tokens = (
+            "loopback",
+            "isatap",
+            "teredo",
+            "bluetooth",
+            "virtualbox",
+            "vmware",
+            "hyper-v",
+            "vethernet",
+        )
 
-        self.previous_network = current
+        candidates = []
+        for name, current in current_by_adapter.items():
+            previous = self.previous_network_by_adapter.get(
+                name
+            )
+            if previous is None:
+                continue
+
+            lowered = name.casefold()
+            if any(
+                token in lowered
+                for token in ignored_tokens
+            ):
+                continue
+
+            received = max(
+                0,
+                current.bytes_recv - previous.bytes_recv,
+            )
+            sent = max(
+                0,
+                current.bytes_sent - previous.bytes_sent,
+            )
+            total = received + sent
+            candidates.append(
+                (total, received, sent, name)
+            )
+
+        self.previous_network_by_adapter = (
+            current_by_adapter
+        )
         self.previous_time = current_time
 
-        return max(0.0, download), max(0.0, upload)
+        if not candidates:
+            self.network_available = True
+            return 0.0, 0.0, self.active_adapter
+
+        _total, received, sent, adapter = max(
+            candidates,
+            key=lambda item: item[0],
+        )
+        self.active_adapter = adapter
+        self.network_available = True
+
+        return (
+            received / elapsed / (1024 * 1024),
+            sent / elapsed / (1024 * 1024),
+            adapter,
+        )
 
     def sample(self):
-        gpu, temperature, vram = self.nvidia_metrics()
-        download, upload = self.network_metrics()
+        download, upload, adapter = self.network_metrics()
 
-        self.gpu_graph.set_value(gpu)
-        self.temperature_graph.set_value(temperature)
-        self.vram_graph.set_value(vram)
-        self.network_down_graph.set_value(download)
-        self.network_up_graph.set_value(upload)
+        if self.stage_name == "download":
+            self.active_graph.set_value(download)
+            if not self.network_available:
+                self.secondary_status.setText(
+                    "Network telemetry unavailable — psutil is missing"
+                )
+            elif adapter:
+                self.secondary_status.setText(
+                    f"Reading from VaultOne via {adapter}"
+                )
+            else:
+                self.secondary_status.setText(
+                    "Waiting for traffic from VaultOne"
+                )
+
+        elif self.stage_name == "upload":
+            self.active_graph.set_value(upload)
+            if not self.network_available:
+                self.secondary_status.setText(
+                    "Network telemetry unavailable — psutil is missing"
+                )
+            elif adapter:
+                self.secondary_status.setText(
+                    f"Writing to VaultOne via {adapter}"
+                )
+            else:
+                self.secondary_status.setText(
+                    "Waiting for traffic to VaultOne"
+                )
+
+        elif self.stage_name == "encoding":
+            encoder, general, temperature = self.nvidia_metrics()
+            self.active_graph.set_value(encoder)
+            temperature_text = (
+                f" • {temperature:.0f}°C"
+                if temperature
+                else ""
+            )
+            self.secondary_status.setText(
+                f"Video Encode {encoder:.0f}%"
+                f" • GPU Core {general:.0f}%"
+                f"{temperature_text}"
+            )
+
+        elif self.stage_name == "verifying":
+            self.verification_pulse += (
+                14 * self.verification_direction
+            )
+            if self.verification_pulse >= 92:
+                self.verification_pulse = 92
+                self.verification_direction = -1
+            elif self.verification_pulse <= 12:
+                self.verification_pulse = 12
+                self.verification_direction = 1
+            self.active_graph.set_value(
+                self.verification_pulse
+            )
 
     def stop_and_hide(self):
         self.timer.stop()
@@ -877,16 +1549,62 @@ class LiveTelemetryPanel(QFrame):
         self.stage_name = "idle"
         self.stage_label.setText("IDLE")
         self.current_job.setText("No active movie")
-        for graph in (
-            self.gpu_graph,
-            self.temperature_graph,
-            self.vram_graph,
-            self.network_down_graph,
-            self.network_up_graph,
-        ):
-            graph.clear_values()
+        self.secondary_status.setText("")
+        self.active_graph.set_metric(
+            "WAITING",
+            "%",
+            100,
+        )
+        self.active_graph.clear_values()
 
 
+
+class TrafficLightStatus(QFrame):
+    def __init__(
+        self,
+        name: str,
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.name = name
+        self.state = "unknown"
+        self.setObjectName("trafficStatus")
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(7, 4, 7, 4)
+        layout.setSpacing(5)
+
+        self.light = QLabel("●")
+        self.light.setObjectName("trafficLight")
+        self.label = QLabel(name)
+        self.label.setObjectName("trafficLabel")
+
+        layout.addWidget(self.light)
+        layout.addWidget(self.label)
+        self.set_status(
+            "unknown",
+            f"{name}: Not checked yet",
+        )
+
+    def set_status(
+        self,
+        state: str,
+        detail: str,
+    ):
+        self.state = state
+        colors = {
+            "good": "#62df78",
+            "warning": "#ffbd59",
+            "bad": "#ff5f72",
+            "unknown": "#77707d",
+        }
+        color = colors.get(state, colors["unknown"])
+        self.light.setStyleSheet(
+            f"color:{color};font-size:16px;"
+        )
+        self.setToolTip(detail)
+        self.light.setToolTip(detail)
+        self.label.setToolTip(detail)
 
 class OperationsMetric(QFrame):
     def __init__(
@@ -944,15 +1662,15 @@ class OperationsCenterPanel(QFrame):
         self.setObjectName("operationsCenter")
 
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(14, 12, 14, 12)
-        outer.setSpacing(9)
+        outer.setContentsMargins(14, 10, 14, 10)
+        outer.setSpacing(8)
 
         heading_row = QHBoxLayout()
         title_box = QVBoxLayout()
         title = QLabel("OPERATIONS CENTER")
         title.setObjectName("operationsTitle")
         subtitle = QLabel(
-            "VaultOne media optimization status at a glance"
+            "Compact health lights — hover any light for details"
         )
         subtitle.setObjectName("operationsSubtitle")
         title_box.addWidget(title)
@@ -969,19 +1687,24 @@ class OperationsCenterPanel(QFrame):
         heading_row.addWidget(refresh_button)
         outer.addLayout(heading_row)
 
-        metrics = QGridLayout()
+        health_row = QHBoxLayout()
+        health_row.setSpacing(6)
+
+        self.nas_status = TrafficLightStatus("NAS")
+        self.jellyfin_status = TrafficLightStatus("Jellyfin")
+        self.gpu_status = TrafficLightStatus("GPU")
+        self.handbrake_status = TrafficLightStatus("HandBrake")
+
+        health_row.addWidget(self.nas_status)
+        health_row.addWidget(self.jellyfin_status)
+        health_row.addWidget(self.gpu_status)
+        health_row.addWidget(self.handbrake_status)
+        health_row.addStretch()
+        outer.addLayout(health_row)
+
+        metrics = QHBoxLayout()
         metrics.setSpacing(8)
 
-        self.nas_metric = OperationsMetric("NAS", "Checking…")
-        self.jellyfin_metric = OperationsMetric(
-            "JELLYFIN",
-            "Checking…",
-        )
-        self.gpu_metric = OperationsMetric("GPU", "Checking…")
-        self.handbrake_metric = OperationsMetric(
-            "HANDBRAKE",
-            "Checking…",
-        )
         self.movies_metric = OperationsMetric(
             "MOVIES LOADED",
             "0",
@@ -1003,18 +1726,13 @@ class OperationsCenterPanel(QFrame):
             "Configured movie library",
         )
 
-        cards = (
-            self.nas_metric,
-            self.jellyfin_metric,
-            self.gpu_metric,
-            self.handbrake_metric,
+        for card in (
             self.movies_metric,
             self.queue_metric,
             self.saving_metric,
             self.free_metric,
-        )
-        for index, card in enumerate(cards):
-            metrics.addWidget(card, index // 4, index % 4)
+        ):
+            metrics.addWidget(card, 1)
         outer.addLayout(metrics)
 
         action_row = QHBoxLayout()
@@ -1024,12 +1742,16 @@ class OperationsCenterPanel(QFrame):
 
         scan_button = QPushButton("☠  SCAN")
         scan_button.setObjectName("primaryButton")
-        scan_button.clicked.connect(self.scan_requested.emit)
+        scan_button.clicked.connect(
+            self.scan_requested.emit
+        )
         action_row.addWidget(scan_button)
 
         start_button = QPushButton("▶  START PROCESS")
         start_button.setObjectName("startButton")
-        start_button.clicked.connect(self.start_requested.emit)
+        start_button.clicked.connect(
+            self.start_requested.emit
+        )
         action_row.addWidget(start_button)
         outer.addLayout(action_row)
 
@@ -1069,27 +1791,44 @@ class OperationsCenterPanel(QFrame):
             str(self.config.get("movie_root", "")).strip()
         )
         nas_ok = root.exists()
-        self.nas_metric.update_value(
-            "ONLINE" if nas_ok else "OFFLINE",
-            str(root) if root else "No library configured",
-            "good" if nas_ok else "bad",
-        )
 
         if nas_ok:
             try:
                 free = shutil.disk_usage(root).free
+                free_text = human_size(free)
+                nas_state = (
+                    "good"
+                    if free > 100 * 1024**3
+                    else "warning"
+                )
+                self.nas_status.set_status(
+                    nas_state,
+                    f"NAS: Connected\n"
+                    f"Library: {root}\n"
+                    f"Free space: {free_text}",
+                )
                 self.free_metric.update_value(
-                    human_size(free),
+                    free_text,
                     "Available on the library volume",
-                    "good" if free > 100 * 1024**3 else "warning",
+                    nas_state,
                 )
             except OSError as exc:
+                self.nas_status.set_status(
+                    "warning",
+                    f"NAS: Connected, but free space could not "
+                    f"be read.\n{exc}",
+                )
                 self.free_metric.update_value(
                     "UNKNOWN",
                     str(exc),
                     "warning",
                 )
         else:
+            self.nas_status.set_status(
+                "bad",
+                f"NAS: Library unavailable\n"
+                f"Configured path: {root or 'Not configured'}",
+            )
             self.free_metric.update_value(
                 "—",
                 "NAS library is unavailable",
@@ -1099,19 +1838,29 @@ class OperationsCenterPanel(QFrame):
         jellyfin_ok, jellyfin_detail = test_jellyfin(
             self.config
         )
-        self.jellyfin_metric.update_value(
-            "CONNECTED" if jellyfin_ok else "OFFLINE",
-            jellyfin_detail,
+        self.jellyfin_status.set_status(
             "good" if jellyfin_ok else "bad",
+            (
+                "Jellyfin: Connected\n"
+                if jellyfin_ok
+                else "Jellyfin: Connection failed\n"
+            )
+            + jellyfin_detail,
         )
 
         handbrake_path = shutil.which(
-            self.config.get("handbrake", "HandBrakeCLI")
+            self.config.get(
+                "handbrake",
+                "HandBrakeCLI",
+            )
         )
-        self.handbrake_metric.update_value(
-            "READY" if handbrake_path else "MISSING",
-            handbrake_path or "HandBrakeCLI was not found",
+        self.handbrake_status.set_status(
             "good" if handbrake_path else "bad",
+            (
+                f"HandBrake: Ready\n{handbrake_path}"
+                if handbrake_path
+                else "HandBrake: HandBrakeCLI was not found"
+            ),
         )
 
         gpu_ok = False
@@ -1137,15 +1886,22 @@ class OperationsCenterPanel(QFrame):
             )
             if result.returncode == 0 and result.stdout.strip():
                 gpu_ok = True
-                gpu_detail = result.stdout.strip().splitlines()[0]
+                gpu_detail = (
+                    result.stdout.strip().splitlines()[0]
+                )
         except Exception as exc:
             gpu_detail = str(exc)
 
-        self.gpu_metric.update_value(
-            "NVENC READY" if gpu_ok else "UNAVAILABLE",
-            gpu_detail,
+        self.gpu_status.set_status(
             "good" if gpu_ok else "bad",
+            (
+                f"GPU: NVENC ready\n{gpu_detail}"
+                if gpu_ok
+                else f"GPU: NVIDIA telemetry unavailable\n"
+                f"{gpu_detail}"
+            ),
         )
+
         self.last_refresh.setText(
             "Checked " + time.strftime("%H:%M:%S")
         )
@@ -1189,6 +1945,21 @@ class SettingsDialog(QDialog):
         enc_form.addRow("NVIDIA encoder:", self.encoder)
         self.preset = QComboBox(); self.preset.addItems(["slow", "medium", "fast", "faster"]); self.preset.setCurrentText(self.config.get("encoder_preset", "medium"))
         enc_form.addRow("Encoder preset:", self.preset)
+        self.analyze_media = QCheckBox(
+            "Analyze codec, runtime, HDR, audio and subtitles after scans"
+        )
+        self.analyze_media.setChecked(
+            bool(self.config.get("analyze_media_on_scan", True))
+        )
+        enc_form.addRow(self.analyze_media)
+
+        analysis_note = QLabel(
+            "Analysis never changes target sizes or queues movies. "
+            "Your size choices remain completely manual."
+        )
+        analysis_note.setWordWrap(True)
+        enc_form.addRow(analysis_note)
+
         tabs.addTab(encoding, "Encoding")
 
         queue_settings = QWidget()
@@ -1367,6 +2138,7 @@ class SettingsDialog(QDialog):
             "update_manifest_url": self.update_manifest_url.text().strip(),
             "queue_finish_action": self.queue_finish_action.currentText(),
             "show_live_telemetry": self.show_live_telemetry.isChecked(),
+            "analyze_media_on_scan": self.analyze_media.isChecked(),
         }
 
         self.jellyfin_test_result.setText("Testing...")
@@ -1473,60 +2245,271 @@ class HelpDialog(QDialog):
 
 
 class QueueManagerDialog(QDialog):
-    def __init__(self, movies: list[Movie], parent=None):
+    def __init__(
+        self,
+        movies: list[Movie],
+        pause_after_current: bool = False,
+        parent=None,
+    ):
         super().__init__(parent)
-        self.setWindowTitle(f"{APP_NAME} — Queue Manager")
-        self.resize(850, 610)
-        self.movies = movies
+        self.setWindowTitle(
+            f"{APP_NAME} — Queue Control Centre"
+        )
+        self.resize(980, 690)
+        self.movies = list(movies)
+
         layout = QVBoxLayout(self)
-        intro = QLabel("Drag items to reorder the queue. Use the buttons to fine-tune or remove titles.")
+
+        heading = QLabel("QUEUE CONTROL CENTRE")
+        heading.setStyleSheet(
+            "font-size:21px;font-weight:900;color:#d15cff;"
+        )
+        layout.addWidget(heading)
+
+        intro = QLabel(
+            "Drag movies to reorder them. Nothing is encoded until "
+            "you press Start Process in the main window."
+        )
         intro.setWordWrap(True)
         layout.addWidget(intro)
 
+        summary = QFrame()
+        summary.setObjectName("queueSummary")
+        summary_layout = QHBoxLayout(summary)
+        summary_layout.setContentsMargins(12, 8, 12, 8)
+
+        self.count_label = QLabel()
+        self.current_label = QLabel()
+        self.target_label = QLabel()
+        self.saving_label = QLabel()
+
+        for widget in (
+            self.count_label,
+            self.current_label,
+            self.target_label,
+            self.saving_label,
+        ):
+            widget.setObjectName("queueSummaryValue")
+            summary_layout.addWidget(widget, 1)
+
+        layout.addWidget(summary)
+
         self.list = QListWidget()
-        self.list.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
-        self.list.setDefaultDropAction(Qt.DropAction.MoveAction)
-        self.list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.list.setDragDropMode(
+            QAbstractItemView.DragDropMode.InternalMove
+        )
+        self.list.setDefaultDropAction(
+            Qt.DropAction.MoveAction
+        )
+        self.list.setSelectionMode(
+            QAbstractItemView.SelectionMode.SingleSelection
+        )
+        self.list.model().rowsMoved.connect(
+            lambda *_args: self.update_summary()
+        )
         layout.addWidget(self.list, 1)
 
         controls = QHBoxLayout()
-        up = QPushButton("↑ Move Up"); up.clicked.connect(lambda: self.move_selected(-1)); controls.addWidget(up)
-        down = QPushButton("↓ Move Down"); down.clicked.connect(lambda: self.move_selected(1)); controls.addWidget(down)
-        remove = QPushButton("✕ Remove"); remove.clicked.connect(self.remove_selected); controls.addWidget(remove)
+
+        top = QPushButton("⇈ TOP")
+        top.clicked.connect(self.move_top)
+        controls.addWidget(top)
+
+        up = QPushButton("↑ UP")
+        up.clicked.connect(
+            lambda: self.move_selected(-1)
+        )
+        controls.addWidget(up)
+
+        down = QPushButton("↓ DOWN")
+        down.clicked.connect(
+            lambda: self.move_selected(1)
+        )
+        controls.addWidget(down)
+
+        bottom = QPushButton("⇊ BOTTOM")
+        bottom.clicked.connect(self.move_bottom)
+        controls.addWidget(bottom)
+
+        remove = QPushButton("✕ REMOVE")
+        remove.clicked.connect(self.remove_selected)
+        controls.addWidget(remove)
+
+        clear = QPushButton("CLEAR QUEUE")
+        clear.clicked.connect(self.clear_queue)
+        controls.addWidget(clear)
+
         controls.addStretch()
-        close = QPushButton("Save Queue Order"); close.setObjectName("primaryButton"); close.clicked.connect(self.accept); controls.addWidget(close)
+
+        sort_title = QPushButton("SORT A–Z")
+        sort_title.clicked.connect(self.sort_title)
+        controls.addWidget(sort_title)
+
+        sort_saving = QPushButton("BIGGEST SAVING")
+        sort_saving.clicked.connect(self.sort_saving)
+        controls.addWidget(sort_saving)
+
         layout.addLayout(controls)
+
+        option_row = QHBoxLayout()
+        self.pause_checkbox = QCheckBox(
+            "Pause after the current movie finishes"
+        )
+        self.pause_checkbox.setChecked(
+            pause_after_current
+        )
+        self.pause_checkbox.setToolTip(
+            "The current movie completes safely. Remaining queued "
+            "movies stay queued until Start Process is pressed again."
+        )
+        option_row.addWidget(self.pause_checkbox)
+        option_row.addStretch()
+
+        cancel = QPushButton("CANCEL")
+        cancel.clicked.connect(self.reject)
+        option_row.addWidget(cancel)
+
+        save = QPushButton("SAVE QUEUE")
+        save.setObjectName("primaryButton")
+        save.clicked.connect(self.accept)
+        option_row.addWidget(save)
+
+        layout.addLayout(option_row)
         self.refresh()
 
     def refresh(self):
         self.list.clear()
-        for movie in self.movies:
+        for index, movie in enumerate(self.movies, 1):
             item = QListWidgetItem(
-                f"{movie.title}    {human_size(movie.size)}  →  {movie.target_gib} GiB    "
+                f"{index:02d}   {movie.title}\n"
+                f"       {human_size(movie.size)}  →  "
+                f"{movie.target_gib} GiB    "
                 f"save {human_size(movie.saving)}"
             )
-            item.setData(Qt.ItemDataRole.UserRole, movie)
+            item.setData(
+                Qt.ItemDataRole.UserRole,
+                movie,
+            )
             self.list.addItem(item)
+        self.update_summary()
+
+    def update_summary(self):
+        movies = self.ordered_movies()
+        current = sum(movie.size for movie in movies)
+        target = sum(
+            int(movie.target_gib * 1024**3)
+            for movie in movies
+        )
+        saving = sum(movie.saving for movie in movies)
+
+        self.count_label.setText(
+            f"QUEUE\n{len(movies)} movies"
+        )
+        self.current_label.setText(
+            f"CURRENT\n{human_size(current)}"
+        )
+        self.target_label.setText(
+            f"TARGET\n{human_size(target)}"
+        )
+        self.saving_label.setText(
+            f"SAVING\n{human_size(saving)}"
+        )
+
+    def rebuild_from_movies(
+        self,
+        movies: list[Movie],
+        selected_movie: Movie | None = None,
+    ):
+        self.movies = list(movies)
+        self.refresh()
+        if selected_movie is not None:
+            for row in range(self.list.count()):
+                if (
+                    self.list.item(row).data(
+                        Qt.ItemDataRole.UserRole
+                    )
+                    is selected_movie
+                ):
+                    self.list.setCurrentRow(row)
+                    break
 
     def move_selected(self, direction: int):
         row = self.list.currentRow()
         target = row + direction
-        if row < 0 or target < 0 or target >= self.list.count():
+        if (
+            row < 0
+            or target < 0
+            or target >= self.list.count()
+        ):
             return
         item = self.list.takeItem(row)
         self.list.insertItem(target, item)
         self.list.setCurrentRow(target)
+        self.update_summary()
+
+    def move_top(self):
+        row = self.list.currentRow()
+        if row <= 0:
+            return
+        item = self.list.takeItem(row)
+        self.list.insertItem(0, item)
+        self.list.setCurrentRow(0)
+        self.update_summary()
+
+    def move_bottom(self):
+        row = self.list.currentRow()
+        if row < 0 or row == self.list.count() - 1:
+            return
+        item = self.list.takeItem(row)
+        self.list.addItem(item)
+        self.list.setCurrentRow(
+            self.list.count() - 1
+        )
+        self.update_summary()
 
     def remove_selected(self):
         row = self.list.currentRow()
         if row >= 0:
             self.list.takeItem(row)
+            self.update_summary()
+
+    def clear_queue(self):
+        answer = QMessageBox.question(
+            self,
+            "Clear queue",
+            "Remove every movie from this queue?",
+            QMessageBox.StandardButton.Yes
+            | QMessageBox.StandardButton.No,
+        )
+        if answer == QMessageBox.StandardButton.Yes:
+            self.list.clear()
+            self.update_summary()
+
+    def sort_title(self):
+        movies = sorted(
+            self.ordered_movies(),
+            key=lambda movie: movie.title.casefold(),
+        )
+        self.rebuild_from_movies(movies)
+
+    def sort_saving(self):
+        movies = sorted(
+            self.ordered_movies(),
+            key=lambda movie: movie.saving,
+            reverse=True,
+        )
+        self.rebuild_from_movies(movies)
 
     def ordered_movies(self) -> list[Movie]:
         return [
-            self.list.item(i).data(Qt.ItemDataRole.UserRole)
+            self.list.item(i).data(
+                Qt.ItemDataRole.UserRole
+            )
             for i in range(self.list.count())
         ]
+
+    def pause_after_current(self) -> bool:
+        return self.pause_checkbox.isChecked()
 
 
 class HealthDialog(QDialog):
@@ -1556,8 +2539,13 @@ class HealthDialog(QDialog):
             try:
                 result = subprocess.run(
                     [config["handbrake"], "--help"],
-                    capture_output=True, text=True, encoding="utf-8",
-                    errors="replace", timeout=15, check=False,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=15,
+                    check=False,
+                    **hidden_process_kwargs(),
                 )
                 output = (result.stdout + result.stderr).lower()
                 nvenc_ok = "nvenc" in output
@@ -1623,7 +2611,15 @@ class StatCard(QFrame):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.config = load_config(); self.movies=[]; self.visible_movies=[]; self.queue=[]; self.pool=QThreadPool.globalInstance(); self.current_movie=None
+        self.config = load_config()
+        self.movies = []
+        self.visible_movies = []
+        self.queue = []
+        self.pool = QThreadPool.globalInstance()
+        self.current_movie = None
+        self.current_started_at = 0.0
+        self.pause_after_current = False
+        self.queue_running = False
         self.setWindowTitle(f"{APP_NAME} {APP_VERSION}"); self.setWindowIcon(QIcon(str(APP_DIR/'assets'/'evils_skull.ico'))); self.resize(1660, 980); self.setMinimumSize(1320, 800)
         self.build_ui()
         self.apply_style()
@@ -1688,10 +2684,24 @@ class MainWindow(QMainWindow):
         for card in (self.found_card,self.optimized_card,self.library_card,self.saving_card): stats.addWidget(card)
         content_layout.addLayout(stats)
         toolbar=QHBoxLayout(); self.search=QLineEdit(); self.search.setPlaceholderText("Search movies..."); self.search.textChanged.connect(self.apply_filter); toolbar.addWidget(self.search,1)
-        self.filter_box=QComboBox(); self.filter_box.addItems(["All movies","Queued only","Not queued"]); self.filter_box.currentTextChanged.connect(self.apply_filter); toolbar.addWidget(self.filter_box)
-        self.sort_box=QComboBox(); self.sort_box.addItems(["Size: High to low","Size: Low to high","Title: A to Z"]); self.sort_box.currentTextChanged.connect(self.apply_filter); toolbar.addWidget(self.sort_box)
+        self.filter_box=QComboBox(); self.filter_box.addItems([
+            "All movies",
+            "Queued only",
+            "Not queued",
+            "High-value candidates",
+            "Possible duplicates",
+            "Metadata failed",
+        ]); self.filter_box.currentTextChanged.connect(self.apply_filter); toolbar.addWidget(self.filter_box)
+        self.sort_box=QComboBox(); self.sort_box.addItems([
+            "Size: High to low",
+            "Size: Low to high",
+            "Title: A to Z",
+            "Saving: High to low",
+            "Runtime: Longest first",
+        ]); self.sort_box.currentTextChanged.connect(self.apply_filter); toolbar.addWidget(self.sort_box)
         queue_manager_btn=QPushButton("☷ QUEUE MANAGER"); queue_manager_btn.clicked.connect(self.show_queue_manager); toolbar.addWidget(queue_manager_btn)
         health_btn=QPushButton("♥ SYSTEM HEALTH"); health_btn.clicked.connect(self.show_health); toolbar.addWidget(health_btn)
+        duplicate_btn=QPushButton("≡ DUPLICATES"); duplicate_btn.clicked.connect(self.show_duplicates); toolbar.addWidget(duplicate_btn)
         self.scan_btn=QPushButton("☠  SCAN"); self.scan_btn.setObjectName("primaryButton"); self.scan_btn.clicked.connect(self.scan); toolbar.addWidget(self.scan_btn); content_layout.addLayout(toolbar)
         bulk_bar=QFrame(); bulk_bar.setObjectName("bulkBar"); bulk=QHBoxLayout(bulk_bar); bulk.setContentsMargins(10,7,10,7); bulk.setSpacing(7)
         bulk.addWidget(QLabel("BULK SELECTION:"))
@@ -1732,9 +2742,9 @@ class MainWindow(QMainWindow):
 
     def make_table_panel(self):
         panel=QFrame(); panel.setObjectName("panel"); layout=QVBoxLayout(panel); layout.setContentsMargins(0,0,0,0)
-        self.table=QTableWidget(0,6); self.table.setHorizontalHeaderLabels(["SELECT","MOVIE","CURRENT SIZE","TARGET SIZE","SAVING","STATUS"]); self.table.verticalHeader().setVisible(False); self.table.setAlternatingRowColors(True); self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows); self.table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection); self.table.itemSelectionChanged.connect(self.update_inspector); self.table.itemChanged.connect(self.table_item_changed)
+        self.table=QTableWidget(0,8); self.table.setHorizontalHeaderLabels(["SELECT","MOVIE","VIDEO","RUNTIME","CURRENT SIZE","TARGET SIZE","SAVING","STATUS"]); self.table.verticalHeader().setVisible(False); self.table.setAlternatingRowColors(True); self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows); self.table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection); self.table.itemSelectionChanged.connect(self.update_inspector); self.table.itemChanged.connect(self.table_item_changed)
         header=self.table.horizontalHeader(); header.setSectionResizeMode(0,QHeaderView.ResizeMode.ResizeToContents); header.setSectionResizeMode(1,QHeaderView.ResizeMode.Stretch)
-        for column in range(2,6): header.setSectionResizeMode(column,QHeaderView.ResizeMode.ResizeToContents)
+        for column in range(2,8): header.setSectionResizeMode(column,QHeaderView.ResizeMode.ResizeToContents)
         layout.addWidget(self.table); return panel
 
     def make_inspector(self):
@@ -1790,6 +2800,24 @@ class MainWindow(QMainWindow):
             Qt.TextInteractionFlag.TextSelectableByMouse
         )
         layout.addWidget(self.detail_path)
+
+        self.media_summary = QLabel(
+            "MEDIA DETAILS PENDING"
+        )
+        self.media_summary.setObjectName("mediaSummary")
+        self.media_summary.setWordWrap(True)
+        self.media_summary.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        layout.addWidget(self.media_summary)
+
+        self.duplicate_warning = QLabel("")
+        self.duplicate_warning.setObjectName(
+            "duplicateWarning"
+        )
+        self.duplicate_warning.setWordWrap(True)
+        self.duplicate_warning.setVisible(False)
+        layout.addWidget(self.duplicate_warning)
 
         divider = QFrame()
         divider.setFrameShape(QFrame.Shape.HLine)
@@ -1868,8 +2896,12 @@ class MainWindow(QMainWindow):
         QFrame#bulkBar{background:#0d0c11;border:1px solid #35243e;border-radius:7px;} QFrame#bulkBar QLabel{color:#b8aebd;font-size:10px;font-weight:800;}
         QCheckBox::indicator,QTableWidget::indicator{width:18px;height:18px;} QTableWidget::indicator:unchecked{border:1px solid #765184;background:#151119;border-radius:3px;} QTableWidget::indicator:checked{border:1px solid #d25cff;background:#8d2bb2;border-radius:3px;}
         QScrollArea#inspectorScroll{background:#0d0c11;border:1px solid #2d2333;border-radius:8px;} QScrollArea#inspectorScroll QWidget{background:#0d0c11;} QFrame#panel,QFrame#inspector{background:#0d0c11;border:1px solid #2d2333;border-radius:8px;} QTableWidget{background:#0d0c11;alternate-background-color:#131117;border:none;gridline-color:#24202a;selection-background-color:#32153f;} QHeaderView::section{background:#111016;color:#bdb4c2;border:none;border-bottom:1px solid #33253c;padding:9px;font-size:10px;font-weight:800;} QTableWidget::item{padding:8px;}
-        QLabel#detailTitle{color:#cf55f6;font-size:18px;font-weight:900;font-style:italic;} QFrame#posterPlaceholder{background:#151119;border:1px solid #493254;border-radius:7px;min-height:250px;} QLabel#posterImage{color:#8f8296;font-size:18px;font-weight:900;background:transparent;} QLabel#detailPath{color:#958b9b;font-size:11px;} QFrame#divider{color:#382b40;} QLabel#sizeSummary{font-size:14px;font-weight:800;color:#eee8f1;} QLabel#savingSummary{color:#70df7b;font-size:13px;font-weight:800;} QLabel#recommendation{background:#17101c;border:1px solid #4d2c5b;border-radius:7px;padding:8px;color:#dfb5f4;font-size:11px;font-weight:800;} QLabel#smallHeading{color:#aea3b3;font-size:10px;font-weight:800;}
+        QLabel#detailTitle{color:#cf55f6;font-size:18px;font-weight:900;font-style:italic;} QFrame#posterPlaceholder{background:#151119;border:1px solid #493254;border-radius:7px;min-height:250px;} QLabel#posterImage{color:#8f8296;font-size:18px;font-weight:900;background:transparent;} QLabel#detailPath{color:#958b9b;font-size:11px;} QLabel#mediaSummary{background:#121017;border:1px solid #312438;border-radius:7px;padding:9px;color:#cfc5d4;font-size:10px;} QLabel#duplicateWarning{background:#2b1d0d;border:1px solid #b17825;border-radius:7px;padding:9px;color:#ffcf78;font-size:10px;font-weight:800;} QFrame#divider{color:#382b40;} QLabel#sizeSummary{font-size:14px;font-weight:800;color:#eee8f1;} QLabel#savingSummary{color:#70df7b;font-size:13px;font-weight:800;} QLabel#recommendation{background:#17101c;border:1px solid #4d2c5b;border-radius:7px;padding:8px;color:#dfb5f4;font-size:11px;font-weight:800;} QLabel#smallHeading{color:#aea3b3;font-size:10px;font-weight:800;}
         QFrame#operationsCenter{background:#0b0910;border:1px solid #4b2858;border-radius:9px;}
+        QFrame#trafficStatus{background:#121017;border:1px solid #302437;border-radius:10px;}
+        QFrame#queueSummary{background:#0f0c14;border:1px solid #4b2858;border-radius:8px;}
+        QLabel#queueSummaryValue{color:#d8cedd;font-size:12px;font-weight:900;padding:3px 8px;}
+        QLabel#trafficLabel{color:#d3c9d8;font-size:10px;font-weight:800;}
         QFrame#operationsMetric{background:#121017;border:1px solid #302437;border-radius:7px;}
         QLabel#operationsTitle{color:#d35cff;font-size:17px;font-weight:900;}
         QLabel#operationsSubtitle,QLabel#operationsRefresh{color:#93889a;font-size:10px;}
@@ -1880,6 +2912,7 @@ class MainWindow(QMainWindow):
         QFrame#telemetryPanel{background:#09070d;border:1px solid #4b2858;border-radius:9px;}
         QLabel#telemetryHeading{color:#d7c8de;font-size:11px;font-weight:900;letter-spacing:1px;}
         QLabel#telemetryJob{color:#b9aebe;font-size:10px;font-weight:700;}
+        QLabel#telemetrySecondary{color:#988ca0;font-size:9px;font-weight:700;}
         QLabel#telemetryStage{background:#351342;border:1px solid #8e35ad;border-radius:9px;padding:4px 10px;color:#e8c8f5;font-size:10px;font-weight:900;}
         QFrame#quickBar{background:#0b0910;border-bottom:1px solid #35253e;}
         QPushButton#quickButton,QPushButton#updateButton{background:#15111a;border:1px solid #493453;border-radius:6px;padding:6px 10px;color:#ded5e3;font-size:10px;font-weight:800;}
@@ -1891,20 +2924,20 @@ class MainWindow(QMainWindow):
         self.scan_btn.setEnabled(False); root=Path(self.config["movie_root"]); self.status.setText(f"Scanning {root}..."); self.progress.setRange(0,0)
         worker=Scanner(root,int(self.config["minimum_size_gib"]*1024**3),int(self.config["default_target_gib"])); worker.signals.finished.connect(self.scan_done); worker.signals.failed.connect(self.failed); self.pool.start(worker)
     def scan_done(self,movies):
-        self.movies=movies
-        self.queue=[]
-        self.progress.setRange(0,100)
+        self.movies = movies
+        self.queue = []
+        self.progress.setRange(0, 100)
         self.progress.setValue(0)
-        self.scan_btn.setEnabled(True)
         self.apply_filter()
         self.found_card.value.setText(str(len(movies)))
         self.library_card.value.setText(
-            human_size(sum(m.size for m in movies))
+            human_size(sum(movie.size for movie in movies))
         )
         self.update_stats()
         self.operations.set_process_status("Ready")
 
         if not movies:
+            self.scan_btn.setEnabled(True)
             self.status.setText(
                 "No movies matched the current scan limit."
             )
@@ -1934,54 +2967,363 @@ class MainWindow(QMainWindow):
             )
             self.pool.start(worker)
         else:
-            self.status.setText(
-                f"Found {len(movies)} movies. "
-                "Configure Jellyfin to download posters automatically."
+            self.start_metadata_analysis(
+                "Movie scan complete."
             )
 
-    def poster_prefetch_progress(self, percent, message):
+    def poster_prefetch_progress(
+        self,
+        percent,
+        message,
+    ):
         self.progress.setValue(percent)
         self.status.setText(message)
 
     def poster_prefetch_done(self, result):
-        self.scan_btn.setEnabled(True)
-        self.progress.setValue(100)
-        self.status.setText(
-            f"Scan complete: {result['total']} movies, "
+        detail = (
             f"{result['available']} posters available "
             f"({result['downloaded']} downloaded)."
         )
-        self.update_inspector()
+        self.start_metadata_analysis(detail)
 
     def poster_prefetch_failed(self, message):
+        log(f"Poster prefetch failed: {message}")
+        self.start_metadata_analysis(
+            f"Poster download stopped: {message}"
+        )
+
+    def start_metadata_analysis(
+        self,
+        previous_detail: str = "",
+    ):
+        if not self.config.get(
+            "analyze_media_on_scan",
+            True,
+        ):
+            self.scan_btn.setEnabled(True)
+            self.progress.setValue(100)
+            self.update_duplicate_groups()
+            self.apply_filter()
+            self.status.setText(
+                f"Scan complete. {previous_detail}".strip()
+            )
+            self.update_inspector()
+            return
+
+        self.status.setText(
+            "Analyzing codec, runtime, HDR, audio and subtitles..."
+        )
+        self.progress.setValue(0)
+        self.scan_btn.setEnabled(False)
+
+        worker = MetadataWorker(
+            self.movies,
+            self.config,
+        )
+        worker.signals.progress.connect(
+            self.metadata_progress
+        )
+        worker.signals.finished.connect(
+            self.metadata_done
+        )
+        worker.signals.failed.connect(
+            self.metadata_failed
+        )
+        self.pool.start(worker)
+
+    def metadata_progress(
+        self,
+        percent: int,
+        message: str,
+    ):
+        self.progress.setValue(percent)
+        self.status.setText(message)
+
+    def metadata_done(self, result: dict):
+        self.scan_btn.setEnabled(True)
+        self.progress.setValue(100)
+        self.update_duplicate_groups()
+        self.apply_filter()
+        self.update_inspector()
+
+        duplicate_titles = len(
+            {
+                normalize_movie_title(movie.title)
+                for movie in self.movies
+                if movie.duplicate_count > 1
+            }
+        )
+        self.status.setText(
+            f"Scan complete: {result['total']} movies; "
+            f"{result['analyzed']} analyzed, "
+            f"{result['cached']} loaded from cache, "
+            f"{result['failed']} failed; "
+            f"{duplicate_titles} possible duplicate title groups."
+        )
+
+    def metadata_failed(self, message: str):
         self.scan_btn.setEnabled(True)
         self.progress.setValue(0)
+        self.update_duplicate_groups()
+        self.apply_filter()
         self.status.setText(
-            f"Movie scan completed, but poster download stopped: {message}"
+            "Movie scan completed, but media analysis stopped: "
+            f"{message}"
         )
+
     def apply_filter(self):
-        search=self.search.text().strip().lower(); mode=self.filter_box.currentText(); items=[m for m in self.movies if search in m.title.lower()]
-        if mode=="Queued only": items=[m for m in items if m.queued]
-        elif mode=="Not queued": items=[m for m in items if not m.queued]
-        sort=self.sort_box.currentText(); items.sort(key=(lambda m:m.size) if sort=="Size: Low to high" else (lambda m:m.title.lower()) if sort=="Title: A to Z" else (lambda m:-m.size)); self.visible_movies=items; self.populate_table()
+        search = self.search.text().strip().lower()
+        mode = self.filter_box.currentText()
+
+        items = [
+            movie
+            for movie in self.movies
+            if search in movie.title.lower()
+            or search in movie.video_text.lower()
+        ]
+
+        if mode == "Queued only":
+            items = [
+                movie
+                for movie in items
+                if movie.queued
+            ]
+        elif mode == "Not queued":
+            items = [
+                movie
+                for movie in items
+                if not movie.queued
+            ]
+        elif mode == "High-value candidates":
+            items = [
+                movie
+                for movie in items
+                if movie.recommendation[0]
+                in {"HIGH VALUE", "GOOD CANDIDATE"}
+            ]
+        elif mode == "Possible duplicates":
+            items = [
+                movie
+                for movie in items
+                if movie.duplicate_count > 1
+            ]
+        elif mode == "Metadata failed":
+            items = [
+                movie
+                for movie in items
+                if movie.metadata_status == "Failed"
+            ]
+
+        sort = self.sort_box.currentText()
+        if sort == "Size: Low to high":
+            items.sort(key=lambda movie: movie.size)
+        elif sort == "Title: A to Z":
+            items.sort(key=lambda movie: movie.title.lower())
+        elif sort == "Saving: High to low":
+            items.sort(key=lambda movie: -movie.saving)
+        elif sort == "Runtime: Longest first":
+            items.sort(
+                key=lambda movie: -movie.duration_seconds
+            )
+        else:
+            items.sort(key=lambda movie: -movie.size)
+
+        self.visible_movies = items
+        self.populate_table()
+
+    def update_duplicate_groups(self):
+        groups: dict[str, list[Movie]] = {}
+        for movie in self.movies:
+            key = normalize_movie_title(movie.title)
+            if key:
+                groups.setdefault(key, []).append(movie)
+
+        for movie in self.movies:
+            movie.duplicate_count = 0
+
+        for group in groups.values():
+            if len(group) > 1:
+                for movie in group:
+                    movie.duplicate_count = len(group)
+
+    def show_duplicates(self):
+        groups: dict[str, list[Movie]] = {}
+        for movie in self.movies:
+            if movie.duplicate_count > 1:
+                groups.setdefault(
+                    normalize_movie_title(movie.title),
+                    [],
+                ).append(movie)
+
+        if not groups:
+            QMessageBox.information(
+                self,
+                "Duplicate review",
+                "No possible duplicate movie titles were found "
+                "in the current scan.",
+            )
+            return
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle(
+            "Possible Duplicate Movies"
+        )
+        dialog.resize(920, 620)
+        layout = QVBoxLayout(dialog)
+
+        note = QLabel(
+            "These are title-based matches for manual review. "
+            "Evil's Media Optimizer will not delete or modify any "
+            "duplicate automatically."
+        )
+        note.setWordWrap(True)
+        layout.addWidget(note)
+
+        listing = QListWidget()
+        for group in sorted(
+            groups.values(),
+            key=lambda value: value[0].title.lower(),
+        ):
+            header = QListWidgetItem(
+                f"⚠ {group[0].title} — {len(group)} files"
+            )
+            header.setForeground(QColor("#ffbd59"))
+            listing.addItem(header)
+            for movie in sorted(
+                group,
+                key=lambda value: -value.size,
+            ):
+                item = QListWidgetItem(
+                    f"    {human_size(movie.size)}  •  "
+                    f"{movie.video_text}  •  {movie.path}"
+                )
+                item.setForeground(QColor("#cfc5d4"))
+                listing.addItem(item)
+        layout.addWidget(listing, 1)
+
+        close = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Close
+        )
+        close.rejected.connect(dialog.reject)
+        layout.addWidget(close)
+        dialog.exec()
+
     def populate_table(self):
         self.table.blockSignals(True)
         self.table.setRowCount(len(self.visible_movies))
-        for row,movie in enumerate(self.visible_movies):
-            check=QTableWidgetItem()
-            check.setFlags(Qt.ItemFlag.ItemIsEnabled|Qt.ItemFlag.ItemIsUserCheckable|Qt.ItemFlag.ItemIsSelectable)
-            check.setCheckState(Qt.CheckState.Checked if movie.selected else Qt.CheckState.Unchecked)
-            check.setData(Qt.ItemDataRole.UserRole,movie)
-            check.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.table.setItem(row,0,check)
 
-            title=QTableWidgetItem(movie.title); title.setToolTip(str(movie.path)); title.setData(Qt.ItemDataRole.UserRole,movie); title.setForeground(QColor("#d35cff" if movie.queued else "#f3edf7")); self.table.setItem(row,1,title); self.table.setItem(row,2,QTableWidgetItem(human_size(movie.size)))
-            target=QComboBox(); choices=[3,5,10,15,20]
-            if movie.target_gib not in choices: choices.append(movie.target_gib); choices.sort()
-            target.addItems([f"{x} GB" for x in choices]); target.setCurrentText(f"{movie.target_gib} GB"); target.currentTextChanged.connect(lambda value,m=movie,r=row:self.change_target(m,r,value)); self.table.setCellWidget(row,3,target)
-            saving=QTableWidgetItem(human_size(movie.saving)); saving.setForeground(QColor("#70df7b")); self.table.setItem(row,4,saving); status=QTableWidgetItem(movie.status if movie.status!="Ready" else ("Queued" if movie.queued else "Ready")); status.setForeground(QColor("#d45aff" if movie.queued else "#b4a9ba")); self.table.setItem(row,5,status)
+        for row, movie in enumerate(self.visible_movies):
+            check = QTableWidgetItem()
+            check.setFlags(
+                Qt.ItemFlag.ItemIsEnabled
+                | Qt.ItemFlag.ItemIsUserCheckable
+                | Qt.ItemFlag.ItemIsSelectable
+            )
+            check.setCheckState(
+                Qt.CheckState.Checked
+                if movie.selected
+                else Qt.CheckState.Unchecked
+            )
+            check.setData(
+                Qt.ItemDataRole.UserRole,
+                movie,
+            )
+            check.setTextAlignment(
+                Qt.AlignmentFlag.AlignCenter
+            )
+            self.table.setItem(row, 0, check)
+
+            title = QTableWidgetItem(movie.title)
+            title.setToolTip(str(movie.path))
+            title.setData(
+                Qt.ItemDataRole.UserRole,
+                movie,
+            )
+            title.setForeground(
+                QColor(
+                    "#ffbd59"
+                    if movie.duplicate_count > 1
+                    else "#d35cff"
+                    if movie.queued
+                    else "#f3edf7"
+                )
+            )
+            self.table.setItem(row, 1, title)
+
+            video_item = QTableWidgetItem(
+                movie.video_text
+                if movie.metadata_status == "Ready"
+                else movie.metadata_status
+            )
+            video_item.setForeground(QColor("#5db7ff"))
+            self.table.setItem(row, 2, video_item)
+
+            self.table.setItem(
+                row,
+                3,
+                QTableWidgetItem(movie.runtime_text),
+            )
+            self.table.setItem(
+                row,
+                4,
+                QTableWidgetItem(human_size(movie.size)),
+            )
+
+            target = QComboBox()
+            choices = [3, 5, 10, 15, 20]
+            if movie.target_gib not in choices:
+                choices.append(movie.target_gib)
+                choices.sort()
+            target.addItems(
+                [f"{value} GB" for value in choices]
+            )
+            target.setCurrentText(
+                f"{movie.target_gib} GB"
+            )
+            target.currentTextChanged.connect(
+                lambda value, m=movie, r=row:
+                self.change_target(m, r, value)
+            )
+            self.table.setCellWidget(row, 5, target)
+
+            saving = QTableWidgetItem(
+                human_size(movie.saving)
+            )
+            saving.setForeground(QColor("#70df7b"))
+            self.table.setItem(row, 6, saving)
+
+            label, _detail = movie.recommendation
+            if movie.duplicate_count > 1:
+                status_text = (
+                    f"Possible duplicate ×{movie.duplicate_count}"
+                )
+                status_color = "#ffbd59"
+            elif movie.status != "Ready":
+                status_text = movie.status
+                status_color = "#b4a9ba"
+            elif movie.queued:
+                status_text = "Queued"
+                status_color = "#d45aff"
+            else:
+                status_text = label
+                status_color = (
+                    "#70df7b"
+                    if label in {
+                        "HIGH VALUE",
+                        "GOOD CANDIDATE",
+                    }
+                    else "#ffbd59"
+                    if label in {"REVIEW", "MODERATE"}
+                    else "#b4a9ba"
+                )
+
+            status = QTableWidgetItem(status_text)
+            status.setForeground(QColor(status_color))
+            self.table.setItem(row, 7, status)
+
         self.table.blockSignals(False)
-        if self.table.rowCount(): self.table.selectRow(0)
+        if self.table.rowCount():
+            self.table.selectRow(0)
 
     def selected_movie(self):
         row=self.table.currentRow(); item=self.table.item(row,1) if row>=0 else None; return item.data(Qt.ItemDataRole.UserRole) if item else None
@@ -2115,15 +3457,53 @@ class MainWindow(QMainWindow):
         self.detail_path.setText(str(movie.path))
         self.size_summary.setText(f"CURRENT {human_size(movie.size)} → TARGET {movie.target_gib} GB")
         self.saving_summary.setText(f"SAVING {human_size(movie.saving)} ({movie.saving_percent}%)")
-        if movie.saving_percent >= 70 and movie.saving >= 10 * 1024**3:
-            recommendation="★★★★★  HIGH-VALUE OPTIMIZATION"
-        elif movie.saving_percent >= 45:
-            recommendation="★★★★☆  RECOMMENDED"
-        elif movie.saving >= 2 * 1024**3:
-            recommendation="★★★☆☆  MODERATE SAVING"
+        label, reason = movie.recommendation
+        stars = {
+            "HIGH VALUE": "★★★★★",
+            "GOOD CANDIDATE": "★★★★☆",
+            "REVIEW": "★★★☆☆",
+            "MODERATE": "★★★☆☆",
+            "ALREADY EFFICIENT": "★★☆☆☆",
+            "LOW VALUE": "★☆☆☆☆",
+            "SKIP": "☆☆☆☆☆",
+        }.get(label, "★★★☆☆")
+        self.recommendation.setText(
+            f"{stars}  {label}\n{reason}"
+        )
+
+        bitrate_mbps = (
+            movie.overall_bitrate / 1_000_000
+            if movie.overall_bitrate
+            else 0
+        )
+        metadata_lines = [
+            f"VIDEO: {movie.video_text}",
+            f"PROFILE: {movie.video_profile or 'Unknown'}",
+            f"RUNTIME: {movie.runtime_text}",
+            f"AUDIO: {movie.audio_text}",
+            f"SUBTITLES: {movie.subtitle_count}",
+            (
+                f"BITRATE: {bitrate_mbps:.1f} Mb/s"
+                if bitrate_mbps
+                else "BITRATE: Unknown"
+            ),
+        ]
+        self.media_summary.setText(
+            "\n".join(metadata_lines)
+            if movie.metadata_status == "Ready"
+            else f"MEDIA ANALYSIS: {movie.metadata_status}"
+        )
+
+        if movie.duplicate_count > 1:
+            self.duplicate_warning.setText(
+                f"⚠ POSSIBLE DUPLICATE: "
+                f"{movie.duplicate_count} matching titles were found. "
+                "Use the Duplicates button to review them. "
+                "Nothing will be deleted automatically."
+            )
+            self.duplicate_warning.setVisible(True)
         else:
-            recommendation="★☆☆☆☆  PROBABLY LEAVE ALONE"
-        self.recommendation.setText(recommendation)
+            self.duplicate_warning.setVisible(False)
         self.queue_selected_btn.setText("✕ REMOVE FROM QUEUE" if movie.queued else "▶ ADD TO QUEUE")
         local_poster = movie.poster_path()
         poster_detail = ""
@@ -2156,7 +3536,7 @@ class MainWindow(QMainWindow):
             self.poster.setText("NO\nPOSTER")
         if poster_detail:
             self.status.setText(poster_detail)
-    def change_target(self,movie,row,value): movie.target_gib=int(value.split()[0]); self.table.setItem(row,4,QTableWidgetItem(human_size(movie.saving))); self.update_inspector(); self.update_stats()
+    def change_target(self,movie,row,value): movie.target_gib=int(value.split()[0]); self.table.setItem(row,6,QTableWidgetItem(human_size(movie.saving))); self.update_inspector(); self.update_stats()
     def set_selected_target(self,size):
         movie=self.selected_movie()
         if not movie:return
@@ -2179,13 +3559,34 @@ class MainWindow(QMainWindow):
             self.queue,
         )
     def start_queue(self):
-        if not self.queue: QMessageBox.information(self,APP_NAME,"Add at least one movie to the queue first."); return
-        answer=QMessageBox.warning(self,APP_NAME,"Queued movies will be encoded and safely replace their originals after verification. Start now?",QMessageBox.StandardButton.Yes|QMessageBox.StandardButton.No)
-        if answer!=QMessageBox.StandardButton.Yes:return
-        self.start_btn.setEnabled(False); self.scan_btn.setEnabled(False); self.process_next()
+        self.update_stats()
+        if not self.queue:
+            QMessageBox.information(
+                self,
+                APP_NAME,
+                "Add at least one movie to the queue first.",
+            )
+            return
+
+        answer = QMessageBox.warning(
+            self,
+            APP_NAME,
+            "Queued movies will be encoded and safely replace their "
+            "originals after verification. Start now?",
+            QMessageBox.StandardButton.Yes
+            | QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+
+        self.queue_running = True
+        self.start_btn.setEnabled(False)
+        self.scan_btn.setEnabled(False)
+        self.process_next()
     def process_next(self):
         self.queue=[m for m in self.movies if m.queued]
         if not self.queue:
+            self.queue_running = False
             self.start_btn.setEnabled(True)
             self.scan_btn.setEnabled(True)
             self.status.setText("Process complete")
@@ -2202,6 +3603,7 @@ class MainWindow(QMainWindow):
             return
         movie=self.queue[0]
         self.current_movie=movie
+        self.current_started_at = time.monotonic()
         movie.status="Working"
         movie.queued=False
         self.update_stats()
@@ -2234,9 +3636,64 @@ class MainWindow(QMainWindow):
         self.progress.setValue(percent)
         self.status.setText(message)
 
-    def encode_done(self,movie,path): movie.status="Done"; self.status.setText(f"Completed: {movie.title}"); self.populate_table(); self.process_next()
+    def encode_done(self, movie, path):
+        movie.status = "Done"
+        elapsed = max(
+            0,
+            time.monotonic() - self.current_started_at,
+        )
+        try:
+            new_size = Path(path).stat().st_size
+        except OSError:
+            new_size = 0
+
+        saved = max(0, movie.size - new_size)
+        elapsed_text = format_runtime(elapsed)
+        remaining = len(
+            [
+                candidate
+                for candidate in self.movies
+                if candidate.queued
+            ]
+        )
+
+        self.status.setText(
+            f"Completed: {movie.title} — "
+            f"saved {human_size(saved)} in {elapsed_text}"
+        )
+        self.operations.set_process_status(
+            f"Complete: {movie.title} • "
+            f"saved {human_size(saved)} • "
+            f"{remaining} remaining"
+        )
+        self.populate_table()
+
+        if self.pause_after_current:
+            self.pause_after_current = False
+            self.queue_running = False
+            self.start_btn.setEnabled(True)
+            self.scan_btn.setEnabled(True)
+            self.telemetry.stop_and_hide()
+            self.status.setText(
+                f"Paused after {movie.title}. "
+                f"{remaining} movie(s) remain queued."
+            )
+            QMessageBox.information(
+                self,
+                "Queue paused safely",
+                f"{movie.title} completed successfully.\n\n"
+                f"Saved: {human_size(saved)}\n"
+                f"Elapsed: {elapsed_text}\n"
+                f"Remaining: {remaining}\n\n"
+                "Press Start Process when you are ready to continue.",
+            )
+            return
+
+        # Briefly display the completed result before starting the next movie.
+        QTimer.singleShot(1800, self.process_next)
     def encode_failed(self,movie,message):
         movie.status="Failed"
+        self.queue_running = False
         self.telemetry.stop_and_hide()
         self.start_btn.setEnabled(True)
         self.scan_btn.setEnabled(True)
@@ -2304,21 +3761,59 @@ class MainWindow(QMainWindow):
         dialog.exec()
 
     def show_queue_manager(self):
-        queued=[movie for movie in self.movies if movie.queued]
+        queued = [
+            movie
+            for movie in self.movies
+            if movie.queued
+        ]
         if not queued:
-            QMessageBox.information(self,APP_NAME,"The queue is empty. Add checked movies first.")
+            QMessageBox.information(
+                self,
+                APP_NAME,
+                "The queue is empty. Add checked movies first.",
+            )
             return
-        dialog=QueueManagerDialog(queued,self)
-        if dialog.exec()==QDialog.DialogCode.Accepted:
-            ordered=dialog.ordered_movies()
+
+        dialog = QueueManagerDialog(
+            queued,
+            self.pause_after_current,
+            self,
+        )
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            ordered = dialog.ordered_movies()
+            self.pause_after_current = (
+                dialog.pause_after_current()
+            )
+
             for movie in self.movies:
-                movie.queued=False
+                movie.queued = False
             for movie in ordered:
-                movie.queued=True
-            order_map={id(movie):index for index,movie in enumerate(ordered)}
-            self.movies.sort(key=lambda movie:(0,order_map[id(movie)]) if id(movie) in order_map else (1,-movie.size))
-            self.apply_filter(); self.update_stats()
-            self.status.setText(f"Queue order saved for {len(ordered)} movie(s).")
+                movie.queued = True
+
+            order_map = {
+                id(movie): index
+                for index, movie in enumerate(ordered)
+            }
+            self.movies.sort(
+                key=lambda movie: (
+                    (0, order_map[id(movie)])
+                    if id(movie) in order_map
+                    else (1, -movie.size)
+                )
+            )
+
+            self.apply_filter()
+            self.update_stats()
+
+            pause_text = (
+                " Pause after current is enabled."
+                if self.pause_after_current
+                else ""
+            )
+            self.status.setText(
+                f"Queue saved with {len(ordered)} movie(s)."
+                f"{pause_text}"
+            )
 
     def show_health(self):
         HealthDialog(self.config,self).exec()

@@ -1,40 +1,38 @@
-# Evil's Media Optimizer 4.1.0
+# Evil's Media Optimizer 4.3.0
 
-## Operations Center
+## Queue Control Centre
 
-Version 4.1 introduces a live dashboard above the movie library.
+Version 4.3 upgrades the queue manager with:
 
-It shows:
+- Drag-and-drop queue ordering
+- Move to top, move up, move down and move to bottom
+- Remove individual movies
+- Clear the full queue
+- Sort alphabetically
+- Sort by largest potential saving
+- Live queue totals for current size, target size and potential saving
 
-- NAS availability and free space
-- Jellyfin connection
-- NVIDIA GPU/NVENC readiness
-- HandBrakeCLI readiness
-- Movies loaded
-- Queue count
-- Potential space saving
-- Current process status
+## Pause after current
 
-The dashboard includes working **Scan** and **Start Process** buttons.
+Enable **Pause after the current movie finishes** from the Queue Control
+Centre. EMO will finish the active movie safely, verify and replace it, then
+leave every remaining title queued.
 
-## Live processing
+Press Start Process later to continue.
 
-The existing telemetry panel now also shows:
+## Completion summary
 
-- Current movie
-- Movies remaining
-- GPU usage
-- GPU temperature
-- VRAM used
-- NAS download speed
-- NAS upload speed
+After each successful movie, the Operations Center briefly shows the title,
+space saved, elapsed time and number of movies remaining before starting the
+next queue item.
 
-The telemetry panel still disappears after processing finishes.
+## Banner cleanup
+
+The baked-in question mark and settings symbols have been removed from the
+banner image. The real Help and Settings controls remain in the functional
+command bar below it.
 
 ## Updating
 
-Install this ZIP through Evil's Media Optimizer 4.0:
-
-1. Open Settings → Updates.
-2. Select `Evils_Media_Optimizer_v4.1.0.zip`.
-3. The external updater closes the app, installs the release, and reopens it.
+Install this ZIP through Settings → Updates after the current process has
+finished.

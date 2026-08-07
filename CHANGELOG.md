@@ -1,17 +1,16 @@
 # Changelog
 
-## 4.1.0
+## 4.3.0
 
-- Added the Operations Center dashboard.
-- Added NAS online/offline and free-space reporting.
-- Added Jellyfin, GPU/NVENC and HandBrake readiness indicators.
-- Added dashboard movie, queue and potential-saving metrics.
-- Added working dashboard Scan and Start Process controls.
-- Added current movie and queue remaining to live telemetry.
-- Added live VRAM usage graph.
-- Synced dashboard status with scanning, processing, completion and failures.
+- Added the Queue Control Centre.
+- Added drag-and-drop ordering and queue totals.
+- Added move top, move bottom, move up and move down.
+- Added queue sorting by title and potential saving.
+- Added remove and clear queue controls.
+- Added Pause After Current.
+- Added completion summaries between queued movies.
+- Removed baked-in Help and Settings symbols from the banner.
 
-## 4.0.0
+## 4.2.2
 
-- Introduced modular `emo` package.
-- Added the resilient external updater.
+- Fixed network adapter telemetry and blank command windows.
