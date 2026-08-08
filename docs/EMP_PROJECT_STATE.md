@@ -8,9 +8,23 @@ This file is the persistent handoff for Evil's Media Encoding Platform (EMP). Re
 - Engine heritage/name: EMO (Evil's Media Optimizer)
 - Repository: EvildeadNZ/EMO
 - Default branch: main
+- Repository visibility: public
 - Creator credit: Designed and Developed by Jason Seath
-- Current development line: EMP 5.0 Milestone 1
-- Current patch target at time of this handoff: 5.0.0-m1.3
+- Current development line: EMP 5.0
+- Known-good updater baseline: 5.0.0-m2
+
+## Current verified state
+
+EMP 5.0.0-m2 successfully completed the project's first real end-to-end self-update through GitHub: EMP detected the newer GitHub Release, downloaded the attached EMP ZIP asset, installed it, and restarted successfully.
+
+Treat 5.0.0-m2 as the known-good baseline for future patches unless a newer release supersedes it.
+
+The m2 build includes the dashboard cleanup requested during Milestone 1:
+
+- Removed `LIVE TO ENCODE / ENCODE TO LIVE` from the upper-right header.
+- Removed `NO BITRATE LEFT BEHIND` from the lower-left sidebar.
+- Preserved the GitHub update-status light and Update Status dialog.
+- Includes the permanent milestone-version parsing improvement intended to support patch forms such as m2.1, m2.2, etc.
 
 ## Product direction
 
@@ -22,10 +36,8 @@ Core principle: do not add a feature unless a first-time user can understand how
 
 - Dark black/purple visual theme.
 - Main dashboard is the Operations Center.
-- Header uses Evil's Media Optimizer artwork while the application/product identity is EMP.
-- The old top-right header block reading `LIVE TO ENCODE / ENCODE TO LIVE` is being removed in 5.0.0-m1.3.
-- The old bottom-left sidebar slogan `NO BITRATE LEFT BEHIND` is being removed in 5.0.0-m1.3.
-- About/splash branding should identify Evil's Media Encoding Platform, Powered by EMO, and credit Jason Seath.
+- Application/product identity is Evil's Media Encoding Platform (EMP), powered by EMO.
+- About/splash branding should credit `Designed and Developed by Jason Seath`.
 
 ## Installer and first-run behaviour
 
@@ -52,58 +64,61 @@ HandBrake is an external dependency. Setup should detect it and help the user lo
 
 ## Update architecture
 
-GitHub is the source of truth for releases and project state.
+GitHub is the source of truth for releases and project state. Repository: `EvildeadNZ/EMO`.
 
-Repository: `EvildeadNZ/EMO`
+The repository is now PUBLIC, so EMP can perform unauthenticated update checks without embedding a private GitHub credential.
 
-EMP has a dashboard update indicator. Desired behaviour:
+EMP has a dashboard update indicator. Desired states:
 
 - Amber: checking.
 - Green: current/up to date.
 - Purple: update available.
 - Red: update/check failure.
 - Grey: repository not configured.
-- Downloading/installing should have a distinct active state.
+- Downloading/installing: distinct active state.
 
-On application startup EMP checks for updates. Clicking the status opens an Update Status dialog with current version, latest version, repository/source, last-check time, Check Again, Open GitHub, and Install Update when appropriate.
+On startup EMP checks for updates. Clicking the status opens an Update Status dialog with current version, latest version, repository/source, last-check time, Check Again, Open GitHub, and Install Update when appropriate.
 
-Preferred update lookup order:
+### Important lesson from first update
 
-1. GitHub Releases.
-2. `update-package.json` on the repository/default branch as development fallback.
-3. If the repository exists but neither provides a published update, report that clearly as a development/no-release state rather than a generic connection failure.
+The installed m1.2 checker preferred GitHub Releases over `update-package.json`. An old 4.1.0 GitHub Release therefore hid newer manifest versions. In addition, the old milestone parser treated `m1.2` and `m1.3` as effectively equal.
 
-The updater should support milestone/prerelease versions such as `5.0.0-m1`, `5.0.0-m1.3`, `5.0.0-rc1`, and final `5.0.0`.
+The bridge release was therefore promoted to `5.0.0-m2`, which the old parser could recognize as newer. Publishing an actual GitHub Release with the EMP ZIP attached allowed the first self-update to succeed.
 
-Updates should be downloaded, validated, installed using the rollback-capable external updater, then EMP should restart. Long-term goal: after initial installation, users should normally update from inside EMP rather than manually downloading ZIPs.
+For future releases:
 
-## Important update issue discovered
+1. Build/test the new EMP package.
+2. Update application version metadata.
+3. Update `update-package.json`.
+4. Update `CHANGELOG.md` and this project-state file when appropriate.
+5. Publish a GitHub Release/tag for the version.
+6. Attach the actual EMP update ZIP as a Release asset. Do not rely on GitHub's automatic source-code ZIP as the application update payload.
+7. Verify an existing EMP installation detects, downloads, installs and restarts into the new version.
 
-The repository is private at the time this file was created. EMP's unauthenticated public GitHub update requests may therefore fail even though ChatGPT/GitHub integration can access the repository. Before public/self-update testing, decide whether to make the repo public or implement an appropriate release/update distribution mechanism that does not require embedding private GitHub credentials in EMP.
+Preferred long-term lookup behaviour is to consider both GitHub Release metadata and development manifest metadata safely, rather than allowing a stale release to hide a newer valid development manifest.
 
 ## Version/release conventions
 
-Development version examples:
+Examples:
 
 - 5.0.0-m1
 - 5.0.0-m1.2
-- 5.0.0-m1.3
 - 5.0.0-m2
+- 5.0.0-m2.1
 - 5.0.0-rc1
 - 5.0.0
 
-Use Git tags/releases such as `v5.0.0-m1.3`.
+Use Git tags/releases such as `v5.0.0-m2`.
 
 Each release should maintain:
 
-- `CHANGELOG.md`
-- `update-package.json`
-- GitHub release notes
-- Version metadata used by the application/updater
+- Application source/version metadata.
+- `CHANGELOG.md`.
+- `update-package.json`.
+- GitHub release notes.
+- The actual EMP update ZIP as a GitHub Release asset.
 
-## Current Milestone 1 work
-
-Completed/tested during development:
+## Completed/tested work
 
 - EMP installer/preview packaging.
 - Platform Builder first-run flow.
@@ -111,46 +126,58 @@ Completed/tested during development:
 - Fixed install-complete popup focus/order.
 - Fixed Platform Builder being skipped because an old config had setup marked complete.
 - Added GitHub repository configuration/default for `EvildeadNZ/EMO`.
+- Repository made public for unauthenticated EMP update checking.
 - Added dashboard update status/checking UI and Update Status dialog.
-- Added milestone-aware version comparison.
+- Diagnosed milestone patch-version comparison problem.
+- Removed the two requested dashboard branding/slogan elements.
+- Published 5.0.0-m2 with an actual EMP ZIP Release asset.
+- VERIFIED: first end-to-end EMP GitHub self-update succeeded.
 
-Current patch 5.0.0-m1.3:
+## Persistent-source policy
 
-- Remove `LIVE TO ENCODE / ENCODE TO LIVE` artwork/block from the upper-right header.
-- Remove `NO BITRATE LEFT BEHIND` from the lower-left sidebar.
-- Preserve the update-light functionality from m1.2.
+Do not rely on a ChatGPT conversation as the only copy of EMP work.
+
+From m2 onward, GitHub should be the authoritative persistent project record. Keep the current source/build inputs, documentation, changelog, update metadata and release history in the repository wherever practical. Release ZIPs should be retained as GitHub Release assets.
+
+Generated throwaway/test packages do not all need permanent storage, but any package that becomes an official update/release should be retained as a Release asset and represented by source/version metadata in Git.
 
 ## Near-term roadmap
 
-### Milestone 1
+### Current / next patches
+
+- Continue dashboard and usability polish from the known-good 5.0.0-m2 baseline.
+- Harden updater/version handling based on lessons from the first Git update.
+- Keep project state updated after significant changes.
+
+### Platform foundation
 
 - Finish installer polish.
 - Finish Platform Builder and settings persistence.
-- Finish reliable GitHub update/release flow.
 - Improve update error states.
-- Establish persistent project documentation in Git.
+- Startup diagnostics/logging.
 
-### Milestone 2
+### Dashboard and Platform Health
 
 - Professional dashboard polish.
-- Platform Health.
+- Platform Health for HandBrake, GPU, storage, NAS and Jellyfin.
 - Useful statistics.
 - Better automatic detection/status reporting.
+- Diagnostics export.
 
-### Milestone 3
+### Encoding platform
 
-- Encoding engine/workflow improvements.
-- Profiles.
-- Distributed/server encoding concepts.
+- Encoding/profile improvements.
+- Better workflow automation.
+- Distributed/server encoding exploration.
+- NAS/local/server workflow hardening.
+- Jellyfin integration improvements.
+- Radarr/Sonarr integration where appropriate.
 
-### Release Candidate
+### Release Candidate / 5.0 Final
 
 - Reliability/testing/polish.
 - Installer/updater hardening.
 - Documentation.
-
-### 5.0 Final
-
 - Public-ready release.
 
 ## Future ideas already discussed
@@ -164,9 +191,9 @@ Current patch 5.0.0-m1.3:
 - Potential distributed encoding/server workflows.
 - Release codenames are optional; technical version numbers remain authoritative.
 
-## Development workflow
+## Development workflow for a new ChatGPT conversation
 
-For future ChatGPT conversations, the user can say:
+The user can say:
 
 `Continue EMP development from EvildeadNZ/EMO. Read docs/EMP_PROJECT_STATE.md first.`
 
