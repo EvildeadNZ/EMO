@@ -1,5 +1,12 @@
 # Changelog
 
+## 5.0.0-m1.3 - Dashboard Cleanup
+
+- Removed `LIVE TO ENCODE / ENCODE TO LIVE` from the upper-right dashboard header.
+- Removed `NO BITRATE LEFT BEHIND` from the lower-left sidebar.
+- Preserved the Milestone 1 GitHub update-status light and Update Status dialog.
+- GitHub repository is now the persistent source of truth for EMP project state and updates.
+
 ## 4.3.0
 
 - Added the Queue Control Centre.
