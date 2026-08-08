@@ -1,13 +1,12 @@
 {
   "name": "Evil's Media Encoding Platform",
-  "version": "5.0.0-m2.1",
+  "version": "5.0.0-m2.2",
   "minimum_updater_version": "5.0.0-m2",
   "architecture": "modular",
   "notes": [
-    "Jellyfin setup is now easier: click Connect to Jellyfin, enter your server, username and password once, and EMP saves the returned access token automatically.",
-    "EMP never stores your Jellyfin password. It clears the password field immediately after a successful connection.",
-    "Existing Jellyfin API keys are still supported, so current setups keep working.",
-    "The same guided Jellyfin connection is available in Platform Builder and Settings.",
-    "Release notes are now written in plain language so users can see what each EMP update actually changes."
+    "Adds a UI Text Size slider under Settings > Appearance.",
+    "Text can be scaled from 85% to 150% to make EMP easier to read on different monitors and viewing distances.",
+    "The chosen text size is saved and automatically restored on future launches.",
+    "Scaling covers EMP's main stylesheet, including navigation, tables, status panels, buttons and dashboard metrics."
   ]
 }
