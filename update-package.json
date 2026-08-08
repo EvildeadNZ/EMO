@@ -1,12 +1,13 @@
 {
   "name": "Evil's Media Encoding Platform",
-  "version": "5.0.0-m2",
-  "minimum_updater_version": "4.0.0",
+  "version": "5.0.0-m2.1",
+  "minimum_updater_version": "5.0.0-m2",
   "architecture": "modular",
   "notes": [
-    "First Git-delivered EMP update.",
-    "Removes LIVE TO ENCODE / ENCODE TO LIVE from the upper-right header.",
-    "Removes NO BITRATE LEFT BEHIND from the lower-left sidebar.",
-    "Fixes milestone patch version comparison so future m2.1, m2.2 and later updates are detected correctly."
+    "Jellyfin setup is now easier: click Connect to Jellyfin, enter your server, username and password once, and EMP saves the returned access token automatically.",
+    "EMP never stores your Jellyfin password. It clears the password field immediately after a successful connection.",
+    "Existing Jellyfin API keys are still supported, so current setups keep working.",
+    "The same guided Jellyfin connection is available in Platform Builder and Settings.",
+    "Release notes are now written in plain language so users can see what each EMP update actually changes."
   ]
 }
