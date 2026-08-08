@@ -1,0 +1,271 @@
+--- a/emo/main_window.py
++++ b/emo/main_window.py
+@@ -9,7 +9,9 @@
+ import sys
+ import time
+ import traceback
++import uuid
+ from collections import deque
++import urllib.error
+ import urllib.parse
+ import urllib.request
+ from dataclasses import dataclass
+@@ -55,6 +57,8 @@
+     "encoder_preset": "medium",
+     "jellyfin_url": "http://192.168.68.79:28096",
+     "jellyfin_api_key": "",
++    "jellyfin_username": "",
++    "jellyfin_device_id": "",
+     "update_manifest_url": "",
+     "github_repo": "EvildeadNZ/EMO",
+     "queue_finish_action": "Do nothing",
+@@ -582,6 +586,60 @@
+         return None, str(exc)
+ 
+ 
++def authenticate_jellyfin(
++    base_url: str,
++    username: str,
++    password: str,
++    *,
++    device_id: str = "",
++) -> tuple[bool, str, str, str]:
++    """Authenticate to Jellyfin and return an access token without storing the password."""
++    base_url = str(base_url or "").strip().rstrip("/")
++    username = str(username or "").strip()
++    if not base_url:
++        return False, "Enter the Jellyfin server URL.", "", device_id
++    if not username:
++        return False, "Enter your Jellyfin username.", "", device_id
++
++    device_id = str(device_id or "").strip() or str(uuid.uuid4())
++    auth_header = (
++        'MediaBrowser Client="Evil\'s Media Encoding Platform", '
++        'Device="Windows PC", '
++        f'DeviceId="{device_id}", '
++        f'Version="{APP_VERSION}"'
++    )
++    payload = json.dumps({
++        "Username": username,
++        "Pw": password or "",
++    }).encode("utf-8")
++    request = urllib.request.Request(
++        f"{base_url}/Users/AuthenticateByName",
++        data=payload,
++        method="POST",
++        headers={
++            "Accept": "application/json",
++            "Content-Type": "application/json",
++            "Authorization": auth_header,
++            "X-Emby-Authorization": auth_header,
++        },
++    )
++    try:
++        with urllib.request.urlopen(request, timeout=15) as response:
++            result = json.loads(response.read().decode("utf-8", errors="replace"))
++        token = str(result.get("AccessToken", "")).strip()
++        if not token:
++            return False, "Jellyfin authenticated but did not return an access token.", "", device_id
++        user = result.get("User") or {}
++        display_name = str(user.get("Name") or username).strip()
++        return True, f"Connected as {display_name}. EMP access token saved; password was not stored.", token, device_id
++    except urllib.error.HTTPError as exc:
++        if exc.code in (401, 403):
++            return False, "Jellyfin rejected the username or password.", "", device_id
++        return False, f"Jellyfin returned HTTP {exc.code}.", "", device_id
++    except Exception as exc:
++        return False, str(exc), "", device_id
++
++
+ def test_jellyfin(config: dict) -> tuple[bool, str]:
+     base_url = str(config.get("jellyfin_url", "")).strip().rstrip("/")
+     api_key = str(config.get("jellyfin_api_key", "")).strip()
+@@ -2549,7 +2607,13 @@
+         for name in ("Jellyfin","Plex","Emby","None"):
+             rb=QRadioButton(name); self.server_group.addButton(rb); self.server_buttons[name]=rb; l.addWidget(rb)
+         self.server_buttons.get(self.config.get("media_server_type","Jellyfin"), self.server_buttons["None"]).setChecked(True)
+-        self.jf_url=QLineEdit(self.config.get("jellyfin_url","")); self.jf_url.setPlaceholderText("Jellyfin URL — e.g. http://server:8096"); l.addWidget(self.jf_url)
++        self.jf_url=QLineEdit(self.config.get("jellyfin_url","")); self.jf_url.setPlaceholderText("Jellyfin URL - e.g. http://server:8096"); l.addWidget(self.jf_url)
++        jf_form=QFormLayout()
++        self.jf_username=QLineEdit(self.config.get("jellyfin_username", "")); self.jf_username.setPlaceholderText("Jellyfin username"); jf_form.addRow("Username:", self.jf_username)
++        self.jf_password=QLineEdit(); self.jf_password.setEchoMode(QLineEdit.EchoMode.Password); self.jf_password.setPlaceholderText("Used once - EMP does not save this password"); jf_form.addRow("Password:", self.jf_password)
++        self.jf_connect=QPushButton("CONNECT TO JELLYFIN"); self.jf_connect.clicked.connect(self._connect_jellyfin); jf_form.addRow("", self.jf_connect)
++        self.jf_connect_status=QLabel("EMP can sign in once and save its own Jellyfin access token. You can still use an existing API key later in Settings."); self.jf_connect_status.setWordWrap(True); jf_form.addRow("Status:", self.jf_connect_status)
++        l.addLayout(jf_form)
+         l.addStretch(); self.addPage(media)
+ 
+         review=QWizardPage(); review.setTitle("Build"); l=QVBoxLayout(review); h,b=self.heading("BUILDING YOUR PLATFORM", "EMP will save this as your active platform profile. You can change any of it later from Settings → Platform Setup."); l.addWidget(h); l.addWidget(b)
+@@ -2611,6 +2675,25 @@
+             if button.isChecked(): return name
+         return "None"
+ 
++    def _connect_jellyfin(self):
++        self.jf_connect_status.setText("Connecting to Jellyfin...")
++        QApplication.processEvents()
++        ok, detail, token, device_id = authenticate_jellyfin(
++            self.jf_url.text(),
++            self.jf_username.text(),
++            self.jf_password.text(),
++            device_id=self.config.get("jellyfin_device_id", ""),
++        )
++        self.jf_connect_status.setText(("✓ " if ok else "✕ ") + detail)
++        self.jf_connect_status.setStyleSheet(
++            "color:#78e286;font-weight:700;" if ok else "color:#ff6879;font-weight:700;"
++        )
++        if ok:
++            self.config["jellyfin_api_key"] = token
++            self.config["jellyfin_device_id"] = device_id
++            self.config["jellyfin_username"] = self.jf_username.text().strip()
++            self.jf_password.clear()
++
+     def _page_changed(self, page_id):
+         if page_id==1: self._check_handbrake()
+         if page_id==5:
+@@ -2645,6 +2728,9 @@
+             "local_work": self.work_edit.text().strip(),
+             "media_server_type": self._selected_server(),
+             "jellyfin_url": self.jf_url.text().strip().rstrip("/"),
++            "jellyfin_username": self.jf_username.text().strip(),
++            "jellyfin_api_key": self.config.get("jellyfin_api_key", ""),
++            "jellyfin_device_id": self.config.get("jellyfin_device_id", ""),
+         }
+ 
+ 
+@@ -2766,13 +2852,26 @@
+         )
+         integration_form.addRow("Jellyfin URL:", self.jellyfin_url)
+ 
++        self.jellyfin_username = QLineEdit(self.config.get("jellyfin_username", ""))
++        self.jellyfin_username.setPlaceholderText("Jellyfin username")
++        integration_form.addRow("Jellyfin username:", self.jellyfin_username)
++
++        self.jellyfin_password = QLineEdit()
++        self.jellyfin_password.setEchoMode(QLineEdit.EchoMode.Password)
++        self.jellyfin_password.setPlaceholderText("Used only while connecting - never saved")
++        integration_form.addRow("Jellyfin password:", self.jellyfin_password)
++
++        self.connect_jellyfin_button = QPushButton("CONNECT TO JELLYFIN")
++        self.connect_jellyfin_button.clicked.connect(self.connect_jellyfin)
++        integration_form.addRow("", self.connect_jellyfin_button)
++
+         key_row = QHBoxLayout()
+         self.jellyfin_api_key = QLineEdit(
+             self.config.get("jellyfin_api_key", "")
+         )
+         self.jellyfin_api_key.setEchoMode(QLineEdit.EchoMode.Password)
+         self.jellyfin_api_key.setPlaceholderText(
+-            "Dashboard → Advanced → API Keys"
++            "Automatically filled by Connect to Jellyfin, or paste an existing API key"
+         )
+         key_row.addWidget(self.jellyfin_api_key, 1)
+ 
+@@ -2799,14 +2898,14 @@
+         integration_form.addRow("", self.test_jellyfin_button)
+ 
+         self.jellyfin_test_result = QLabel(
+-            "Enter the URL and API key, then test the connection."
++            "Use Connect to Jellyfin for automatic setup, or enter an existing API key and test it."
+         )
+         self.jellyfin_test_result.setWordWrap(True)
+         integration_form.addRow("Status:", self.jellyfin_test_result)
+ 
+         note = QLabel(
+-            "Posters are downloaded from Jellyfin and cached locally. "
+-            "The API key is stored in this app folder's config.json."
++            "Connect to Jellyfin signs in once and saves only the returned EMP access token. "
++            "Your Jellyfin password is never written to config.json. Existing API keys remain supported."
+         )
+         note.setWordWrap(True)
+         integration_form.addRow(note)
+@@ -2900,6 +2999,8 @@
+             self.work.setText(updated.get("local_work", self.work.text()))
+             self.handbrake.setText(updated.get("handbrake", self.handbrake.text()))
+             self.jellyfin_url.setText(updated.get("jellyfin_url", self.jellyfin_url.text()))
++            self.jellyfin_username.setText(updated.get("jellyfin_username", self.jellyfin_username.text()))
++            self.jellyfin_api_key.setText(updated.get("jellyfin_api_key", self.jellyfin_api_key.text()))
+             QMessageBox.information(self, "Platform setup", "Platform settings loaded into this Settings window. Click Save to apply them.")
+ 
+     def browse_root(self):
+@@ -2910,11 +3011,31 @@
+         folder = QFileDialog.getExistingDirectory(self, "Choose local work folder", self.work.text())
+         if folder: self.work.setText(folder)
+ 
++    def connect_jellyfin(self):
++        self.jellyfin_test_result.setText("Connecting to Jellyfin...")
++        QApplication.processEvents()
++        ok, detail, token, device_id = authenticate_jellyfin(
++            self.jellyfin_url.text(),
++            self.jellyfin_username.text(),
++            self.jellyfin_password.text(),
++            device_id=self.config.get("jellyfin_device_id", ""),
++        )
++        self.jellyfin_test_result.setText(("✓ " if ok else "✕ ") + detail)
++        self.jellyfin_test_result.setStyleSheet(
++            "color:#78e286;font-weight:700;" if ok else "color:#ff6879;font-weight:700;"
++        )
++        if ok:
++            self.jellyfin_api_key.setText(token)
++            self.config["jellyfin_device_id"] = device_id
++            self.jellyfin_password.clear()
++
+     def test_jellyfin_connection(self):
+         temporary_config = {
+             **self.config,
+             "jellyfin_url": self.jellyfin_url.text().strip().rstrip("/"),
++            "jellyfin_username": self.jellyfin_username.text().strip(),
+             "jellyfin_api_key": self.jellyfin_api_key.text().strip(),
++            "jellyfin_device_id": self.config.get("jellyfin_device_id", ""),
+             "update_manifest_url": self.update_manifest_url.text().strip(),
+             "github_repo": self.github_repo.text().strip(),
+             "queue_finish_action": self.queue_finish_action.currentText(),
+--- a/emo/version.py
++++ b/emo/version.py
+@@ -1 +1 @@
+-APP_VERSION = "5.0.0-m2"
++APP_VERSION = "5.0.0-m2.1"
+--- a/update-package.json
++++ b/update-package.json
+@@ -1,12 +1,13 @@
+ {
+-  "name": "Evil\'s Media Encoding Platform",
+-  "version": "5.0.0-m2",
+-  "minimum_updater_version": "4.0.0",
++  "name": "Evil's Media Encoding Platform",
++  "version": "5.0.0-m2.1",
++  "minimum_updater_version": "5.0.0-m2",
+   "architecture": "modular",
+   "notes": [
+-    "First Git-delivered EMP update.",
+-    "Removes LIVE TO ENCODE / ENCODE TO LIVE from the upper-right header.",
+-    "Removes NO BITRATE LEFT BEHIND from the lower-left sidebar.",
+-    "Fixes milestone patch version comparison so future m2.1, m2.2 and later updates are detected correctly."
++    "Jellyfin setup is now easier: click Connect to Jellyfin, enter your server, username and password once, and EMP saves the returned access token automatically.",
++    "EMP never stores your Jellyfin password. It clears the password field immediately after a successful connection.",
++    "Existing Jellyfin API keys are still supported, so current setups keep working.",
++    "The same guided Jellyfin connection is available in Platform Builder and Settings.",
++    "Release notes are now written in plain language so users can see what each EMP update actually changes."
+   ]
+ }
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -1,5 +1,20 @@
+ # Changelog
+ 
++## 5.0.0-m2.1 - Easier Jellyfin Setup
++
++### What changed
++- Added a new **Connect to Jellyfin** button in Settings and Platform Builder.
++- Enter your Jellyfin server address, username and password once; EMP asks Jellyfin for an access token and fills the API credential automatically.
++- EMP **does not save your Jellyfin password**. The password field is cleared after a successful connection.
++- Existing manually entered Jellyfin API keys continue to work.
++- Connection feedback now explains whether authentication succeeded and which account connected.
++
++### Why this helps
++Previously, users had to open the Jellyfin dashboard, find the API Keys section, create/copy a key, then paste it into EMP. This update makes the normal setup path a simple sign-in while still keeping manual API-key support for advanced users.
++
++### Security
++EMP stores only the Jellyfin access token needed for future API requests. It does not write the Jellyfin password to `config.json`.
++
+ ## 5.0.0-m1.3 - Dashboard cleanup
+ - Removed the `LIVE TO ENCODE / ENCODE TO LIVE` badge from the header artwork.
+ - Removed the `NO BITRATE LEFT BEHIND` sidebar slogan.
