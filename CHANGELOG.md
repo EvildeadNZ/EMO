@@ -1,5 +1,19 @@
 # Changelog
 
+## 5.0.0-m2.2 - Adjustable UI Text Size
+
+### What changed
+- Added **UI Text Size** under **Settings → Appearance**.
+- Added a slider from **85% to 150%**, with **100%** as the normal EMP size.
+- EMP remembers the selected size and restores it on the next launch.
+- Main navigation, dashboard metrics, tables, status text, buttons and other stylesheet-driven text scale together.
+
+### Why this helps
+EMP contains a lot of useful information on one screen, but the original sizing can be too small on high-resolution displays or when the monitor is further away. Users can now make EMP easier to read without changing Windows display scaling for every other application.
+
+### How to use it
+Open **Settings → Appearance**, move **UI Text Size** to the size you prefer, then click **Save**.
+
 ## 5.0.0-m2.1 - Easier Jellyfin Setup
 
 ### What changed
