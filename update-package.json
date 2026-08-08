@@ -1,12 +1,12 @@
 {
   "name": "Evil's Media Encoding Platform",
-  "version": "5.0.0-m2.3.1",
+  "version": "5.0.0-m2.4",
   "minimum_updater_version": "5.0.0-m2",
   "architecture": "modular",
   "notes": [
-    "Adds the Theme & Banner selector under Settings > Appearance.",
-    "Keeps Original Purple and adds Red Ember as a second visual option.",
-    "Theme selection is saved and restored automatically.",
-    "This hotfix replaces the Red Ember banner with a higher-quality version."
+    "Hotfix: replaces the Red Ember banner with the higher-quality full-width image.",
+    "Improves sharpness, detail and readability on large/high-resolution displays.",
+    "Renumbered from m2.3.1 to m2.4 so existing EMP version comparison detects the update correctly.",
+    "No functional changes: theme selection, UI Text Size, libraries and integrations remain unchanged."
   ]
 }
