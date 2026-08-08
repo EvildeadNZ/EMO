@@ -1,12 +1,12 @@
 {
   "name": "Evil's Media Encoding Platform",
-  "version": "5.0.0-m2.2",
+  "version": "5.0.0-m2.3.1",
   "minimum_updater_version": "5.0.0-m2",
   "architecture": "modular",
   "notes": [
-    "Adds a UI Text Size slider under Settings > Appearance.",
-    "Text can be scaled from 85% to 150% to make EMP easier to read on different monitors and viewing distances.",
-    "The chosen text size is saved and automatically restored on future launches.",
-    "Scaling covers EMP's main stylesheet, including navigation, tables, status panels, buttons and dashboard metrics."
+    "Adds the Theme & Banner selector under Settings > Appearance.",
+    "Keeps Original Purple and adds Red Ember as a second visual option.",
+    "Theme selection is saved and restored automatically.",
+    "This hotfix replaces the Red Ember banner with a higher-quality version."
   ]
 }
