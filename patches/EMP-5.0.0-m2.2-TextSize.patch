@@ -1,0 +1,79 @@
+# EMP 5.0.0-m2.2 source patch
+# Base: EMP 5.0.0-m2.1
+
+--- a/emo/main_window.py
++++ b/emo/main_window.py
+@@
+-from PySide6.QtGui import QColor, QPixmap, QIcon, QPainter, QPainterPath, QPen, QBrush, QDesktopServices
++from PySide6.QtGui import QColor, QPixmap, QIcon, QPainter, QPainterPath, QPen, QBrush, QFont, QDesktopServices
+@@
+-    QRadioButton, QButtonGroup,
++    QRadioButton, QButtonGroup, QSlider,
+@@
+     "remote_worker_path": "",
++    "ui_scale_percent": 100,
+ }
++
++def scale_qss_font_sizes(qss: str, percent: int) -> str:
++    """Scale pixel font sizes in EMP's stylesheet without changing layout dimensions."""
++    factor = max(0.85, min(1.50, int(percent) / 100.0))
++
++    def repl(match):
++        value = int(match.group(1))
++        return f"font-size:{max(8, round(value * factor))}px"
++
++    return re.sub(r"font-size\s*:\s*(\d+)px", repl, qss)
+@@ Appearance tab
+         appearance_form.addRow("Application theme:", self.theme)
++
++        scale_row = QHBoxLayout()
++        self.ui_scale = QSlider(Qt.Orientation.Horizontal)
++        self.ui_scale.setRange(85, 150)
++        self.ui_scale.setSingleStep(5)
++        self.ui_scale.setPageStep(10)
++        self.ui_scale.setTickInterval(5)
++        self.ui_scale.setTickPosition(QSlider.TickPosition.TicksBelow)
++        self.ui_scale.setValue(int(self.config.get("ui_scale_percent", 100)))
++        self.ui_scale_value = QLabel(f"{self.ui_scale.value()}%")
++        self.ui_scale_value.setMinimumWidth(48)
++        self.ui_scale_value.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
++        self.ui_scale.valueChanged.connect(lambda value: self.ui_scale_value.setText(f"{value}%"))
++        scale_row.addWidget(self.ui_scale, 1)
++        scale_row.addWidget(self.ui_scale_value)
++        scale_widget = QWidget(); scale_widget.setLayout(scale_row)
++        appearance_form.addRow("UI text size:", scale_widget)
++
++        scale_note = QLabel(
++            "100% is the normal EMP size. Increase this if labels, buttons, tables or status text are difficult to read. "
++            "The setting applies after Save and is remembered for future launches."
++        )
++        scale_note.setWordWrap(True)
++        appearance_form.addRow("", scale_note)
+@@ Settings values
+             "theme": self.theme.currentText(),
++            "ui_scale_percent": self.ui_scale.value(),
+@@ apply_style
+         for original, replacement in replacements.items():
+             qss = qss.replace(original, replacement)
++
++        ui_scale = int(self.config.get("ui_scale_percent", 100))
++        qss = scale_qss_font_sizes(qss, ui_scale)
++
++        app = QApplication.instance()
++        if app is not None:
++            font = QFont("Segoe UI")
++            font.setPointSizeF(9.0 * max(0.85, min(1.50, ui_scale / 100.0)))
++            app.setFont(font)
+ 
+         self.setStyleSheet(qss)
+@@ Settings confirmation
+-                f"Settings saved. Theme: "
+-                f"{self.config.get('theme', 'Skull Purple')}."
++                f"Settings saved. Theme: {self.config.get('theme', 'Skull Purple')}; "
++                f"text size: {self.config.get('ui_scale_percent', 100)}%."
+
+--- a/emo/version.py
++++ b/emo/version.py
+@@
+-APP_VERSION = "5.0.0-m2.1"
++APP_VERSION = "5.0.0-m2.2"
