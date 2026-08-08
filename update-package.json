@@ -1,12 +1,12 @@
 {
   "name": "Evil's Media Encoding Platform",
-  "version": "5.0.0-m1.3",
+  "version": "5.0.0-m2",
   "minimum_updater_version": "4.0.0",
   "architecture": "modular",
   "notes": [
-    "EMP 5.0 Milestone 1 dashboard cleanup patch.",
+    "First Git-delivered EMP update.",
     "Removes LIVE TO ENCODE / ENCODE TO LIVE from the upper-right header.",
     "Removes NO BITRATE LEFT BEHIND from the lower-left sidebar.",
-    "Preserves the GitHub update-status light and Update Status dialog introduced in Milestone 1.2."
+    "Fixes milestone patch version comparison so future m2.1, m2.2 and later updates are detected correctly."
   ]
 }
