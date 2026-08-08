@@ -12,15 +12,15 @@ This file is the persistent handoff for Evil's Media Encoding Platform (EMP). Re
 - Creator credit: Designed and Developed by Jason Seath
 - Current development line: EMP 5.0
 - Known-good updater baseline: 5.0.0-m2
-- Current prepared patch: 5.0.0-m2.2
+- Current release: 5.0.0-m2.3.1
 
 ## Current verified state
 
 EMP 5.0.0-m2 successfully completed the project's first real end-to-end self-update through GitHub: EMP detected the newer GitHub Release, downloaded the attached EMP ZIP asset, installed it, and restarted successfully.
 
-Treat 5.0.0-m2 as the known-good baseline until a newer release is confirmed through the same end-to-end update path.
+Treat 5.0.0-m2 as the known-good updater baseline unless a newer release is explicitly verified through the same full update path.
 
-## Current prepared releases
+## Current release line
 
 ### 5.0.0-m2.1 - Easier Jellyfin Setup
 
@@ -29,7 +29,7 @@ Treat 5.0.0-m2 as the known-good baseline until a newer release is confirmed thr
 - EMP authenticates with Jellyfin and stores the returned access token.
 - Jellyfin passwords are never saved to `config.json` and are cleared after successful connection.
 - Existing manually-entered API keys remain supported.
-- Release notes are now written for end users with clear What changed / Why this helps / Security sections where appropriate.
+- Release notes are written for end users with clear What changed / Why this helps / Security sections where appropriate.
 
 ### 5.0.0-m2.2 - Adjustable UI Text Size
 
@@ -37,9 +37,23 @@ Treat 5.0.0-m2 as the known-good baseline until a newer release is confirmed thr
 - Slider range: 85% to 150%; default 100%.
 - The setting is saved and restored on future launches.
 - EMP scales its main stylesheet typography, including navigation, dashboard metrics, tables, status panels and buttons.
-- The feature is intended to improve readability on high-resolution displays and screens viewed from further away without forcing the user to alter Windows-wide display scaling.
-- Source patch: `patches/EMP-5.0.0-m2.2-TextSize.patch`.
-- User release explanation: `docs/releases/5.0.0-m2.2.md`.
+
+### 5.0.0-m2.3 - Theme & Banner Choice
+
+- Adds a Theme & Banner selector under **Settings → Appearance**.
+- Keeps **Original Purple** as the classic/default option.
+- Adds **Red Ember** as a second visual option.
+- Theme selection changes the matching banner and visual accents together.
+- The selected theme is saved and restored on future launches.
+- Appearance controls stay in Settings rather than cluttering the dashboard.
+- The theme system should remain extensible so more approved banner designs can be added later.
+
+### 5.0.0-m2.3.1 - Red Ember HQ Hotfix
+
+- Replaces the first Red Ember banner with the approved higher-quality banner asset.
+- This is a visual-only hotfix; Original Purple and functional behaviour are unchanged.
+- GitHub Release `v5.0.0-m2.3.1` exists with the official EMP ZIP attached.
+- Repository version metadata and update manifest have been synchronized to 5.0.0-m2.3.1.
 
 ## Product direction
 
@@ -54,6 +68,8 @@ Core principle: do not add a feature unless a first-time user can understand how
 - Application/product identity is Evil's Media Encoding Platform (EMP), powered by EMO.
 - About/splash branding should credit `Designed and Developed by Jason Seath`.
 - `LIVE TO ENCODE / ENCODE TO LIVE` and `NO BITRATE LEFT BEHIND` were removed from the dashboard in the m2 line.
+- Approved banner/theme set currently includes Original Purple and Red Ember.
+- When additional banner themes are requested later, add them through the same Appearance banner library rather than creating one-off controls.
 
 ## Installer and first-run behaviour
 
@@ -102,7 +118,7 @@ The old m1.2 checker preferred GitHub Releases over `update-package.json`, allow
 For future releases:
 
 1. Build and syntax-check the new EMP package.
-2. Update application version metadata.
+2. Update application version metadata in `emo/version.py`.
 3. Update `update-package.json`.
 4. Update `CHANGELOG.md`, user-facing release docs and this project-state file where appropriate.
 5. Publish a GitHub Release/tag for the version.
@@ -111,7 +127,7 @@ For future releases:
 
 ## Version/release conventions
 
-Examples: `5.0.0-m2`, `5.0.0-m2.1`, `5.0.0-m2.2`, `5.0.0-rc1`, `5.0.0`.
+Examples: `5.0.0-m2`, `5.0.0-m2.1`, `5.0.0-m2.2`, `5.0.0-m2.3`, `5.0.0-m2.3.1`, `5.0.0-rc1`, `5.0.0`.
 
 Each release should maintain application source/version metadata, `CHANGELOG.md`, `update-package.json`, user-facing GitHub release notes and the actual EMP update ZIP asset.
 
@@ -122,6 +138,7 @@ Do not rely on a ChatGPT conversation as the only copy of EMP work. GitHub is th
 ## Near-term roadmap
 
 - Continue dashboard/readability/usability polish.
+- Expand the Appearance banner/theme library when new approved designs are requested.
 - Finish installer and Platform Builder polish.
 - Improve update error states and updater reliability.
 - Add startup diagnostics/logging and exportable diagnostics.
