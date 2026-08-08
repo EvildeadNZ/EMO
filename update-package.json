@@ -1,16 +1,12 @@
 {
-  "name": "Evil's Media Optimizer",
-  "version": "4.3.0",
+  "name": "Evil's Media Encoding Platform",
+  "version": "5.0.0-m1.3",
   "minimum_updater_version": "4.0.0",
   "architecture": "modular",
   "notes": [
-    "Adds the Queue Control Centre.",
-    "Adds drag-and-drop ordering and queue statistics.",
-    "Adds move top, bottom, up and down controls.",
-    "Adds sorting by title or potential saving.",
-    "Adds remove and clear queue controls.",
-    "Adds Pause After Current for safe queue pausing.",
-    "Adds a brief completion summary between movies.",
-    "Removes the baked-in Help and Settings symbols from the banner."
+    "EMP 5.0 Milestone 1 dashboard cleanup patch.",
+    "Removes LIVE TO ENCODE / ENCODE TO LIVE from the upper-right header.",
+    "Removes NO BITRATE LEFT BEHIND from the lower-left sidebar.",
+    "Preserves the GitHub update-status light and Update Status dialog introduced in Milestone 1.2."
   ]
 }
