@@ -1,5 +1,27 @@
 # Changelog
 
+## 5.0.0-m2.3.1 - Red Ember HQ Hotfix
+
+### What changed
+- Replaced the Red Ember banner with a much higher-quality version.
+- Improved sharpness, skull detail, red glow/ember effects and readability across wide displays.
+- Original Purple remains unchanged.
+
+### Why this helps
+The first Red Ember banner looked soft when stretched across the full EMP header. This hotfix improves only the banner asset so the theme looks crisp without changing encoding, Jellyfin, updater or queue behaviour.
+
+## 5.0.0-m2.3 - Theme & Banner Choice
+
+### What changed
+- Added a Theme & Banner selector under **Settings → Appearance**.
+- Added **Original Purple** and **Red Ember** choices.
+- Theme choice changes the matching banner and visual accents together.
+- The selected theme is saved and restored on future launches.
+- The theme system is structured so more approved banner designs can be added later.
+
+### Why this helps
+EMP can now have multiple visual styles without cluttering the dashboard. Appearance controls stay in Settings, and users can choose the look they prefer.
+
 ## 5.0.0-m2.2 - Adjustable UI Text Size
 
 ### What changed
