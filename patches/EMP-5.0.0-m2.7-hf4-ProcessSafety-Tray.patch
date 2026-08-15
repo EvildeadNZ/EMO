@@ -1,12 +1,6 @@
 diff --git a/emo/main_window.py b/emo/main_window.py
 --- a/emo/main_window.py
 +++ b/emo/main_window.py
-@@ -17,8 +17,8 @@ from pathlib import Path
- 
- from .updater import UpdateError, launch_external_update
- from .version import APP_VERSION
- 
- try:
 @@ -26,7 +26,7 @@ except ImportError:
      psutil = None
  
@@ -44,9 +38,7 @@ diff --git a/emo/main_window.py b/emo/main_window.py
 +            QIcon(str(APP_DIR / "assets" / "evils_skull.ico")),
 +            self,
 +        )
-+        self.tray_icon.setToolTip(
-+            f"{APP_NAME} {APP_VERSION}"
-+        )
++        self.tray_icon.setToolTip(f"{APP_NAME} {APP_VERSION}")
 +
 +        menu = QMenu(self)
 +        restore_action = QAction("Restore EMP", self)
@@ -73,8 +65,7 @@ diff --git a/emo/main_window.py b/emo/main_window.py
 +    def restore_from_tray(self):
 +        self.show()
 +        self.setWindowState(
-+            self.windowState()
-+            & ~Qt.WindowState.WindowMinimized
++            self.windowState() & ~Qt.WindowState.WindowMinimized
 +        )
 +        self.raise_()
 +        self.activateWindow()
@@ -108,9 +99,7 @@ diff --git a/emo/main_window.py b/emo/main_window.py
 +        self.status.setText(
 +            "Exit requested — the current movie will finish, then EMP will close."
 +        )
-+        self.operations.set_process_status(
-+            "Exit requested after current movie"
-+        )
++        self.operations.set_process_status("Exit requested after current movie")
 +        if self.tray_icon.isVisible():
 +            self.tray_icon.showMessage(
 +                APP_NAME,
@@ -155,14 +144,7 @@ diff --git a/emo/main_window.py b/emo/main_window.py
 +            self.tray_icon.hide()
 +        event.accept()
 +
-@@ -1395,6 +1450,26 @@ class MainWindow(QMainWindow):
-     def encode_done(self, movie, path):
-         movie.status = "Done"
-         elapsed = max(
-             0,
-             time.monotonic() - self.current_started_at,
-         )
-@@ -1450,6 +1525,22 @@ class MainWindow(QMainWindow):
+@@ -1450,6 +1505,22 @@ class MainWindow(QMainWindow):
          )
          self.populate_table()
  
@@ -176,9 +158,7 @@ diff --git a/emo/main_window.py b/emo/main_window.py
 +            self.status.setText(
 +                f"Completed {movie.title}. EMP will now close as requested."
 +            )
-+            self.operations.set_process_status(
-+                "Current movie complete — exiting"
-+            )
++            self.operations.set_process_status("Current movie complete — exiting")
 +            if self.tray_icon.isVisible():
 +                self.tray_icon.showMessage(
 +                    APP_NAME,
@@ -192,13 +172,14 @@ diff --git a/emo/main_window.py b/emo/main_window.py
          if self.pause_after_current:
              self.pause_after_current = False
              self.queue_running = False
-@@ -1498,7 +1589,7 @@ class MainWindow(QMainWindow):
+ 
  diff --git a/emo/version.py b/emo/version.py
 --- a/emo/version.py
 +++ b/emo/version.py
 @@ -1 +1 @@
 -APP_VERSION = "5.0.0-m2.4"
 +APP_VERSION = "5.0.0-m2.7-hf4"
+
  diff --git a/update-package.json b/update-package.json
 --- a/update-package.json
 +++ b/update-package.json
@@ -220,10 +201,11 @@ diff --git a/emo/main_window.py b/emo/main_window.py
 +    "An EMP system-tray icon provides Restore EMP and Exit EMP controls while the program is running."
    ]
  }
+
  diff --git a/CHANGELOG.md b/CHANGELOG.md
 --- a/CHANGELOG.md
 +++ b/CHANGELOG.md
-@@ -1,3 +1,11 @@
+@@ -1,3 +1,12 @@
  # Changelog
  
 +## 5.0.0-m2.7-hf4 - Process Safety & System Tray Hotfix
