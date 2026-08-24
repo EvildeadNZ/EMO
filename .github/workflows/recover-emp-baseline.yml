@@ -6,6 +6,7 @@ on:
       - emp-5-recovery-baseline
     paths:
       - '.github/workflows/recover-emp-baseline.yml'
+  workflow_dispatch:
 
 permissions:
   contents: write
