@@ -1,0 +1,14 @@
+name: Actions smoke test
+
+on:
+  pull_request:
+    branches:
+      - main
+    types: [opened, synchronize, reopened]
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Confirm GitHub Actions can start
+        run: echo "Actions OK"
