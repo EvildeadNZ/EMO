@@ -1,2 +1,2 @@
 Trigger GitHub Actions recovery verification after repository Actions settings were enabled on 2026-08-25.
-Write-permission isolation trigger: 09:16 NZST.
+Shell-only recovery trigger: 09:16 NZST.
