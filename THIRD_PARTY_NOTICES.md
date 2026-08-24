@@ -2,11 +2,11 @@
 
 Evil's Media Encoding Platform (EMP), powered by EMO, coordinates several third-party tools and libraries. Those projects remain the work of their respective authors and are governed by their own licences.
 
-EMP is not affiliated with, endorsed by, or sponsored by HandBrake, FFmpeg, The Qt Company, NVIDIA, the psutil project, or the Pillow project.
+EMP is not affiliated with, endorsed by, or sponsored by HandBrake, FFmpeg, The Qt Company, NVIDIA, the psutil project, the Pillow project, or the Jellyfin Project.
 
 ## Current distribution model
 
-The current EMP source repository does **not** redistribute HandBrake, FFmpeg, or NVIDIA driver/NVENC binaries. EMP looks for compatible tools already installed on the user's computer and invokes them as separate programs where required.
+The current EMP source repository does **not** redistribute HandBrake, FFmpeg, NVIDIA driver/NVENC, or Jellyfin server binaries. EMP looks for compatible tools/services already installed or configured by the user and invokes or connects to them separately where required.
 
 Future installers must preserve this distinction unless a later release intentionally redistributes a third-party component and satisfies that component's redistribution requirements.
 
@@ -64,6 +64,16 @@ If the Pillow dependency is confirmed unused, it should be removed from EMP rath
 
 NVIDIA and NVENC are trademarks or technologies of NVIDIA Corporation. Use of those names in EMP describes compatibility only.
 
+### Jellyfin
+
+- Purpose in EMP: optional connection to a user-configured Jellyfin server for library, server and poster information.
+- Current integration: EMP communicates with Jellyfin through its HTTP API; Jellyfin is not embedded in EMP.
+- Upstream server licence: GNU General Public License version 2 (GPLv2).
+- Upstream project: https://jellyfin.org/
+- Source project: https://github.com/jellyfin/jellyfin
+
+Jellyfin server software is not currently bundled with EMP.
+
 ## Packaging rule for EMP
 
 Before any public installer is released, the installer/package must be reviewed against the exact versions and files it distributes. At minimum, the release process should:
@@ -72,6 +82,6 @@ Before any public installer is released, the installer/package must be reviewed 
 2. include required copyright and licence notices;
 3. keep corresponding source/source-offer obligations where a licence requires them;
 4. avoid implying ownership of or affiliation with third-party projects;
-5. verify whether any change from external-tool invocation to binary redistribution changes EMP's obligations.
+5. verify whether any change from external-tool/service integration to binary redistribution changes EMP's obligations.
 
 This file is a project compliance record, not legal advice. Licence obligations should be rechecked whenever EMP changes what it bundles or distributes.
