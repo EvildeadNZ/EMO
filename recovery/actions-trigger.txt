@@ -1,0 +1,1 @@
+Trigger GitHub Actions smoke and recovery verification after repository Actions settings were enabled on 2026-08-25.
