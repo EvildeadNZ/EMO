@@ -21,7 +21,7 @@ jobs:
           git clone --branch emp-5-recovery-baseline --single-branch https://github.com/EvildeadNZ/EMO.git emp-recovery
           cd emp-recovery
           cat recovery/source_chunks/part*.b64 > /tmp/emp-source.gz.b64
-          base64 --decode /tmp/emp-source.gz.b64 > /tmp/emp-source.gz
+          base64 --decode --ignore-garbage /tmp/emp-source.gz.b64 > /tmp/emp-source.gz
           echo "7ed4622204042e93a74eed97b798a40db60caee8004098036bea2b230b9184c0  /tmp/emp-source.gz" | sha256sum --check -
           gzip --decompress --stdout /tmp/emp-source.gz > emo/main_window.py
           python recovery/finalize_recovery.py
