@@ -9,7 +9,9 @@ import subprocess
 import sys
 import time
 import traceback
+import uuid
 from collections import deque
+import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
@@ -23,17 +25,18 @@ try:
 except ImportError:
     psutil = None
 
-from PySide6.QtCore import QObject, QRunnable, QThreadPool, Qt, Signal, QSize, QTimer, QRectF
-from PySide6.QtGui import QColor, QPixmap, QIcon, QPainter, QPainterPath, QPen, QBrush
+from PySide6.QtCore import QObject, QRunnable, QThreadPool, Qt, Signal, QSize, QTimer, QRectF, QUrl
+from PySide6.QtGui import QColor, QPixmap, QIcon, QPainter, QPainterPath, QPen, QBrush, QCloseEvent, QAction, QFont, QDesktopServices
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog,
     QFormLayout, QFrame, QGridLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMainWindow,
     QMessageBox, QProgressBar, QPushButton, QSpinBox, QSplitter, QStackedLayout,
     QTableWidget, QTableWidgetItem, QTextBrowser, QVBoxLayout, QWidget, QListWidget, QScrollArea,
-    QListWidgetItem, QTabWidget, QGroupBox, QAbstractItemView,
+    QListWidgetItem, QTabWidget, QGroupBox, QAbstractItemView, QSystemTrayIcon, QMenu, QWizard, QWizardPage,
+    QRadioButton, QButtonGroup, QSlider,
 )
 
-APP_NAME = "Evil's Media Optimizer"
+APP_NAME = "Evil's Media Encoding Platform"
 APP_DIR = Path(__file__).resolve().parents[1]
 CONFIG_FILE = APP_DIR / "config.json"
 HISTORY_FILE = APP_DIR / "history.json"
@@ -54,12 +57,318 @@ DEFAULT_CONFIG = {
     "encoder_preset": "medium",
     "jellyfin_url": "http://192.168.68.79:28096",
     "jellyfin_api_key": "",
+    "jellyfin_username": "",
+    "jellyfin_device_id": "",
     "update_manifest_url": "",
+    "github_repo": "EvildeadNZ/EMO",
     "queue_finish_action": "Do nothing",
     "show_live_telemetry": True,
     "analyze_media_on_scan": True,
+    "theme": "Skull Purple",
+    "banner_theme": "Original Purple",
+    "setup_complete": False,
+    "workflow_mode": "nas_pc_nas",
+    "output_root": r"\\VaultOne\MainMovies",
+    "media_server_type": "Jellyfin",
+    "remote_worker_host": "",
+    "remote_worker_path": "",
+    "ui_scale_percent": 100,
 }
 VIDEO_EXTENSIONS = {".mkv", ".mp4", ".m4v", ".avi", ".mov", ".ts", ".m2ts", ".webm"}
+
+THEME_PALETTES = {
+    "Skull Purple": {
+        "bg": "#08080c",
+        "surface": "#0d0c11",
+        "surface2": "#121017",
+        "border": "#35243e",
+        "accent": "#d35cff",
+        "accent_dark": "#4f1768",
+        "accent_hover": "#70218f",
+        "text": "#f3edf7",
+        "muted": "#a99daf",
+        "success": "#70df7b",
+        "warning": "#ffbd59",
+        "danger": "#ff6879",
+        "blue": "#5db7ff",
+    },
+    "OLED Black": {
+        "bg": "#000000",
+        "surface": "#050505",
+        "surface2": "#0b0b0b",
+        "border": "#292929",
+        "accent": "#ffffff",
+        "accent_dark": "#242424",
+        "accent_hover": "#3b3b3b",
+        "text": "#f7f7f7",
+        "muted": "#9b9b9b",
+        "success": "#62e879",
+        "warning": "#ffd166",
+        "danger": "#ff5f70",
+        "blue": "#65bfff",
+    },
+    "Diablo Ember": {
+        "bg": "#090403",
+        "surface": "#130807",
+        "surface2": "#1b0d09",
+        "border": "#542117",
+        "accent": "#ff6a2a",
+        "accent_dark": "#6b1e0c",
+        "accent_hover": "#9a2c10",
+        "text": "#f8e8df",
+        "muted": "#c29b88",
+        "success": "#8ad16a",
+        "warning": "#ffb347",
+        "danger": "#ff4040",
+        "blue": "#69a9ff",
+    },
+    "Jellyfin Violet": {
+        "bg": "#070711",
+        "surface": "#0c0b1a",
+        "surface2": "#141129",
+        "border": "#342c67",
+        "accent": "#aa5cff",
+        "accent_dark": "#4d237d",
+        "accent_hover": "#6c32a9",
+        "text": "#f1edff",
+        "muted": "#aaa0cf",
+        "success": "#69df91",
+        "warning": "#ffc857",
+        "danger": "#ff667d",
+        "blue": "#58c5ff",
+    },
+    "Matrix Green": {
+        "bg": "#010602",
+        "surface": "#041008",
+        "surface2": "#07190d",
+        "border": "#174f29",
+        "accent": "#42ff72",
+        "accent_dark": "#0d5a25",
+        "accent_hover": "#12843a",
+        "text": "#dfffe6",
+        "muted": "#78b889",
+        "success": "#42ff72",
+        "warning": "#d6ff5c",
+        "danger": "#ff596c",
+        "blue": "#5bd7ff",
+    },
+    "Cyberpunk Neon": {
+        "bg": "#07040d",
+        "surface": "#10091b",
+        "surface2": "#19102a",
+        "border": "#4a2870",
+        "accent": "#ff3bd4",
+        "accent_dark": "#6c145f",
+        "accent_hover": "#9a1b89",
+        "text": "#fff0fc",
+        "muted": "#c3a4c9",
+        "success": "#5dffb0",
+        "warning": "#ffe14f",
+        "danger": "#ff4d6d",
+        "blue": "#00d9ff",
+    },
+    "Blood Moon": {
+        "bg": "#080203",
+        "surface": "#120507",
+        "surface2": "#1b090c",
+        "border": "#57202a",
+        "accent": "#ff3e5f",
+        "accent_dark": "#711428",
+        "accent_hover": "#9d1c38",
+        "text": "#ffecef",
+        "muted": "#c89ca5",
+        "success": "#7bd987",
+        "warning": "#ffbd59",
+        "danger": "#ff334f",
+        "blue": "#6bb8ff",
+    },
+    "Arctic Blue": {
+        "bg": "#03080d",
+        "surface": "#07121b",
+        "surface2": "#0c1c29",
+        "border": "#204b67",
+        "accent": "#53c9ff",
+        "accent_dark": "#145276",
+        "accent_hover": "#1c78a7",
+        "text": "#eaf8ff",
+        "muted": "#91b9cc",
+        "success": "#67e3a1",
+        "warning": "#ffd166",
+        "danger": "#ff667b",
+        "blue": "#53c9ff",
+    },
+    "Toxic Lime": {
+        "bg": "#050701",
+        "surface": "#0d1205",
+        "surface2": "#151d08",
+        "border": "#425d19",
+        "accent": "#b7ff38",
+        "accent_dark": "#3f6810",
+        "accent_hover": "#5c9418",
+        "text": "#f3ffe5",
+        "muted": "#a9c681",
+        "success": "#b7ff38",
+        "warning": "#ffe25b",
+        "danger": "#ff5f6f",
+        "blue": "#61c9ff",
+    },
+    "Retro Amber": {
+        "bg": "#090702",
+        "surface": "#151005",
+        "surface2": "#211907",
+        "border": "#684b16",
+        "accent": "#ffbf3f",
+        "accent_dark": "#72500f",
+        "accent_hover": "#a06f16",
+        "text": "#fff5d9",
+        "muted": "#c7ad72",
+        "success": "#9ad76b",
+        "warning": "#ffbf3f",
+        "danger": "#ff645f",
+        "blue": "#6dbbff",
+    },
+    "Steel Grey": {
+        "bg": "#07090b",
+        "surface": "#0e1216",
+        "surface2": "#171d23",
+        "border": "#394550",
+        "accent": "#9fb3c8",
+        "accent_dark": "#3e4e5d",
+        "accent_hover": "#566b7d",
+        "text": "#edf2f6",
+        "muted": "#9daab5",
+        "success": "#6fd18a",
+        "warning": "#e4bd62",
+        "danger": "#ef6875",
+        "blue": "#6eb8ef",
+    },
+}
+
+THEME_BANNERS = {'Skull Purple': 'themes/skull_purple.png', 'OLED Black': 'themes/oled_black.png', 'Diablo Ember': 'themes/diablo_ember.png', 'Jellyfin Violet': 'themes/jellyfin_violet.png', 'Matrix Green': 'themes/matrix_green.png', 'Cyberpunk Neon': 'themes/cyberpunk_neon.png', 'Blood Moon': 'themes/blood_moon.png', 'Arctic Blue': 'themes/arctic_blue.png', 'Toxic Lime': 'themes/toxic_lime.png', 'Retro Amber': 'themes/retro_amber.png', 'Steel Grey': 'themes/steel_grey.png'}
+
+
+
+
+
+def version_key(value: str):
+    # Supports normal EMP milestone versions plus chained hotfix suffixes, e.g.
+    # 5.0.0-m2.5-hf1.  Keeping the hotfix number in the comparison prevents
+    # GitHub releases from being incorrectly reported as "UP TO DATE".
+    match = re.match(
+        r"^(\d+)\.(\d+)\.(\d+)(?:[-.]?(preview|m|milestone|rc)(\d+)(?:\.(\d+))?)?(?:[-.]?hf(\d+))?$",
+        value.strip().lower().lstrip("v"),
+    )
+    if not match:
+        nums = [int(x) for x in re.findall(r"\d+", value)]
+        return tuple((nums + [0, 0, 0, 0, 0, 0, 0])[:7])
+    major, minor, patch = map(int, match.group(1, 2, 3))
+    kind = match.group(4)
+    num = int(match.group(5) or 0)
+    sub = int(match.group(6) or 0)
+    hotfix = int(match.group(7) or 0)
+    rank = {"preview": 0, "m": 1, "milestone": 1, "rc": 2, None: 3}[kind]
+    return (major, minor, patch, rank, num, sub, hotfix)
+
+class GitHubUpdateSignals(QObject):
+    done = Signal(dict)
+
+class GitHubUpdateWorker(QRunnable):
+    def __init__(self, repo: str):
+        super().__init__(); self.repo = repo.strip().strip('/')
+        self.signals = GitHubUpdateSignals()
+
+    def _json(self, url: str):
+        req = urllib.request.Request(
+            url,
+            headers={
+                "Accept": "application/vnd.github+json",
+                "User-Agent": "EMP-Updater",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=8) as response:
+            return json.load(response)
+
+    def run(self):
+        result = {"ok": False, "error": "Unknown update error"}
+        try:
+            repo_info = self._json(f"https://api.github.com/repos/{self.repo}")
+            branch = str(repo_info.get("default_branch") or "main")
+            release = None
+            try:
+                release = self._json(
+                    f"https://api.github.com/repos/{self.repo}/releases/latest"
+                )
+            except urllib.error.HTTPError as exc:
+                if exc.code != 404:
+                    raise
+
+            if release:
+                tag = str(release.get("tag_name", "")).lstrip("vV")
+                assets = release.get("assets") or []
+                zip_asset = next(
+                    (a for a in assets if str(a.get("name", "")).lower().endswith(".zip")),
+                    None,
+                )
+                result = {
+                    "ok": True,
+                    "version": tag,
+                    "newer": bool(tag) and version_key(tag) > version_key(APP_VERSION),
+                    "release_url": release.get("html_url", ""),
+                    "download_url": (zip_asset or {}).get("browser_download_url", ""),
+                    "asset_name": (zip_asset or {}).get("name", ""),
+                    "notes": release.get("body", ""),
+                    "source": "release",
+                    "repo": self.repo,
+                    "branch": branch,
+                }
+            else:
+                # Before formal GitHub Releases exist, use the repository's
+                # update-package.json as the source of truth and download the
+                # current branch archive when it advertises a newer build.
+                manifest_url = (
+                    f"https://raw.githubusercontent.com/{self.repo}/{branch}/"
+                    "update-package.json"
+                )
+                manifest = self._json(manifest_url)
+                tag = str(manifest.get("version", "")).lstrip("vV")
+                result = {
+                    "ok": True,
+                    "version": tag,
+                    "newer": bool(tag) and version_key(tag) > version_key(APP_VERSION),
+                    "release_url": f"https://github.com/{self.repo}",
+                    "download_url": (
+                        f"https://codeload.github.com/{self.repo}/zip/refs/heads/{branch}"
+                    ),
+                    "asset_name": f"EMP-{branch}.zip",
+                    "notes": "Latest build advertised by update-package.json",
+                    "source": "branch",
+                    "repo": self.repo,
+                    "branch": branch,
+                }
+        except urllib.error.HTTPError as exc:
+            if exc.code == 404:
+                result = {
+                    "ok": False,
+                    "error": (
+                        f"GitHub repository or update metadata was not found: {self.repo}. "
+                        "Make sure the repository is public and contains update-package.json."
+                    ),
+                }
+            else:
+                result = {"ok": False, "error": f"GitHub HTTP {exc.code}: {exc.reason}"}
+        except Exception as exc:
+            result = {"ok": False, "error": str(exc)}
+        self.signals.done.emit(result)
+
+def scale_qss_font_sizes(qss: str, percent: int) -> str:
+    """Scale pixel font sizes in EMP's stylesheet without changing layout dimensions."""
+    factor = max(0.85, min(1.50, int(percent) / 100.0))
+
+    def repl(match):
+        value = int(match.group(1))
+        return f"font-size:{max(8, round(value * factor))}px"
+
+    return re.sub(r"font-size\s*:\s*(\d+)px", repl, qss)
 
 
 def load_config() -> dict:
@@ -67,7 +376,10 @@ def load_config() -> dict:
         CONFIG_FILE.write_text(json.dumps(DEFAULT_CONFIG, indent=2), encoding="utf-8")
         return DEFAULT_CONFIG.copy()
     try:
-        return {**DEFAULT_CONFIG, **json.loads(CONFIG_FILE.read_text(encoding="utf-8"))}
+        config = {**DEFAULT_CONFIG, **json.loads(CONFIG_FILE.read_text(encoding="utf-8"))}
+        if not str(config.get("github_repo", "")).strip():
+            config["github_repo"] = DEFAULT_CONFIG["github_repo"]
+        return config
     except Exception:
         return DEFAULT_CONFIG.copy()
 
@@ -294,6 +606,164 @@ def jellyfin_poster_path(
         return None, str(exc)
 
 
+def _jellyfin_token_headers(token: str, device_id: str) -> dict[str, str]:
+    auth_header = (
+        'MediaBrowser Client="Evil\'s Media Encoding Platform", '
+        'Device="Windows PC", '
+        f'DeviceId="{device_id}", '
+        f'Version="{APP_VERSION}", '
+        f'Token="{token}"'
+    )
+    return {
+        "Accept": "application/json",
+        "Authorization": auth_header,
+        "X-Emby-Authorization": auth_header,
+        "X-Emby-Token": token,
+    }
+
+
+def _get_or_create_jellyfin_api_key(
+    base_url: str,
+    login_token: str,
+    device_id: str,
+) -> tuple[str, str]:
+    """Return a persistent EMP API key when the signed-in user may manage keys."""
+    app_name = "Evil's Media Encoding Platform"
+    headers = _jellyfin_token_headers(login_token, device_id)
+
+    def fetch_keys() -> list[dict]:
+        request = urllib.request.Request(
+            f"{base_url}/Auth/Keys",
+            headers=headers,
+        )
+        with urllib.request.urlopen(request, timeout=10) as response:
+            payload = json.loads(
+                response.read().decode("utf-8", errors="replace")
+            )
+        if isinstance(payload, dict):
+            items = payload.get("Items") or payload.get("items") or []
+            return items if isinstance(items, list) else []
+        return []
+
+    def matching_key(items: list[dict]) -> str:
+        for item in reversed(items):
+            name = str(
+                item.get("AppName")
+                or item.get("appName")
+                or item.get("App")
+                or ""
+            ).strip()
+            token = str(
+                item.get("AccessToken")
+                or item.get("accessToken")
+                or item.get("Token")
+                or ""
+            ).strip()
+            if name.casefold() == app_name.casefold() and token:
+                return token
+        return ""
+
+    items = fetch_keys()
+    existing = matching_key(items)
+    if existing:
+        return existing, "Existing EMP API key retrieved from Jellyfin."
+
+    create_url = (
+        f"{base_url}/Auth/Keys?"
+        + urllib.parse.urlencode({"app": app_name})
+    )
+    create_request = urllib.request.Request(
+        create_url,
+        data=b"",
+        method="POST",
+        headers=headers,
+    )
+    with urllib.request.urlopen(create_request, timeout=10):
+        pass
+
+    created = matching_key(fetch_keys())
+    if not created:
+        raise RuntimeError(
+            "Jellyfin created the EMP key but did not return it when keys were refreshed."
+        )
+    return created, "New EMP API key created and retrieved from Jellyfin."
+
+
+def authenticate_jellyfin(
+    base_url: str,
+    username: str,
+    password: str,
+    *,
+    device_id: str = "",
+) -> tuple[bool, str, str, str]:
+    """Sign in once, then retrieve/create EMP's persistent Jellyfin API key."""
+    base_url = str(base_url or "").strip().rstrip("/")
+    username = str(username or "").strip()
+    if not base_url:
+        return False, "Enter the Jellyfin server URL.", "", device_id
+    if not username:
+        return False, "Enter your Jellyfin username.", "", device_id
+
+    device_id = str(device_id or "").strip() or str(uuid.uuid4())
+    auth_header = (
+        'MediaBrowser Client="Evil\'s Media Encoding Platform", '
+        'Device="Windows PC", '
+        f'DeviceId="{device_id}", '
+        f'Version="{APP_VERSION}"'
+    )
+    payload = json.dumps({
+        "Username": username,
+        "Pw": password or "",
+    }).encode("utf-8")
+    request = urllib.request.Request(
+        f"{base_url}/Users/AuthenticateByName",
+        data=payload,
+        method="POST",
+        headers={
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "Authorization": auth_header,
+            "X-Emby-Authorization": auth_header,
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            result = json.loads(response.read().decode("utf-8", errors="replace"))
+        login_token = str(result.get("AccessToken", "")).strip()
+        if not login_token:
+            return False, "Jellyfin authenticated but did not return an access token.", "", device_id
+        user = result.get("User") or {}
+        display_name = str(user.get("Name") or username).strip()
+
+        try:
+            api_key, key_detail = _get_or_create_jellyfin_api_key(
+                base_url, login_token, device_id
+            )
+            return (
+                True,
+                f"Connected as {display_name}. {key_detail} Password was not stored.",
+                api_key,
+                device_id,
+            )
+        except urllib.error.HTTPError as exc:
+            if exc.code in (401, 403):
+                return (
+                    True,
+                    f"Connected as {display_name}. This account cannot manage Jellyfin API keys, "
+                    "so EMP saved the signed-in access token instead. Use an administrator account "
+                    "with Connect to Jellyfin to let EMP retrieve/create its persistent API key.",
+                    login_token,
+                    device_id,
+                )
+            raise
+    except urllib.error.HTTPError as exc:
+        if exc.code in (401, 403):
+            return False, "Jellyfin rejected the username or password.", "", device_id
+        return False, f"Jellyfin returned HTTP {exc.code}.", "", device_id
+    except Exception as exc:
+        return False, str(exc), "", device_id
+
+
 def test_jellyfin(config: dict) -> tuple[bool, str]:
     base_url = str(config.get("jellyfin_url", "")).strip().rstrip("/")
     api_key = str(config.get("jellyfin_api_key", "")).strip()
@@ -454,7 +924,7 @@ class Movie:
         pieces = [codec, self.resolution_text]
         if self.hdr_format:
             pieces.append(self.hdr_format)
-        return " • ".join(piece for piece in pieces if piece)
+        return "  ".join(piece for piece in pieces if piece)
 
     @property
     def audio_text(self) -> str:
@@ -473,53 +943,295 @@ class Movie:
             else "Unknown",
         )
         if self.audio_channels:
-            return f"{codec} • {self.audio_channels} ch"
+            return f"{codec}  {self.audio_channels} ch"
         return codec
 
     @property
-    def recommendation(self) -> tuple[str, str]:
-        saving_gib = self.saving / 1024**3
+    def bitrate_mbps(self) -> float:
+        return (
+            self.overall_bitrate / 1_000_000
+            if self.overall_bitrate
+            else 0.0
+        )
+
+    @property
+    def optimization_breakdown(self) -> dict[str, int]:
+        """
+        Return the score components used by EMO.
+
+        Positive values increase optimization priority. Negative values
+        reduce it. This is advice only and never changes queue selection.
+        """
         codec = self.video_codec.casefold()
+        bitrate = self.bitrate_mbps
+        saving_gib = self.saving / 1024**3
 
-        if (
-            self.saving <= 1024**3
-            or self.target_gib * 1024**3 >= self.size
-        ):
-            return "SKIP", "Very little space would be recovered."
+        breakdown = {
+            "Codec": 0,
+            "Bitrate": 0,
+            "Recoverable storage": 0,
+            "Saving percentage": 0,
+            "Resolution": 0,
+            "Efficiency penalty": 0,
+        }
 
-        if self.saving_percent >= 70 and saving_gib >= 15:
-            return (
-                "HIGH VALUE",
-                "Large potential saving at your selected manual target.",
+        if codec in {"mpeg2video", "vc1", "mpeg4"}:
+            breakdown["Codec"] = 28
+        elif codec in {"h264", "avc"}:
+            breakdown["Codec"] = 20
+        elif codec in {"hevc", "h265", "vp9"}:
+            breakdown["Codec"] = 7
+        elif codec == "av1":
+            breakdown["Codec"] = 3
+        elif codec:
+            breakdown["Codec"] = 12
+
+        if bitrate >= 45:
+            breakdown["Bitrate"] = 20
+        elif bitrate >= 30:
+            breakdown["Bitrate"] = 16
+        elif bitrate >= 18:
+            breakdown["Bitrate"] = 11
+        elif bitrate >= 10:
+            breakdown["Bitrate"] = 6
+        elif bitrate > 0:
+            breakdown["Bitrate"] = 2
+
+        if saving_gib >= 30:
+            breakdown["Recoverable storage"] = 22
+        elif saving_gib >= 15:
+            breakdown["Recoverable storage"] = 18
+        elif saving_gib >= 7:
+            breakdown["Recoverable storage"] = 12
+        elif saving_gib >= 3:
+            breakdown["Recoverable storage"] = 7
+        elif saving_gib > 1:
+            breakdown["Recoverable storage"] = 3
+
+        if self.saving_percent >= 80:
+            breakdown["Saving percentage"] = 20
+        elif self.saving_percent >= 65:
+            breakdown["Saving percentage"] = 16
+        elif self.saving_percent >= 50:
+            breakdown["Saving percentage"] = 11
+        elif self.saving_percent >= 30:
+            breakdown["Saving percentage"] = 5
+
+        if self.resolution_text == "2160p":
+            breakdown["Resolution"] = 8
+        elif self.resolution_text in {"1440p", "1080p"}:
+            breakdown["Resolution"] = 5
+        elif self.height:
+            breakdown["Resolution"] = 3
+
+        if codec in {"hevc", "h265", "av1"} and bitrate < 18:
+            breakdown["Efficiency penalty"] = -12
+        elif codec in {"hevc", "h265", "vp9"}:
+            breakdown["Efficiency penalty"] = -5
+
+        if self.target_gib * 1024**3 >= self.size:
+            breakdown["Efficiency penalty"] = -40
+
+        return breakdown
+
+    @property
+    def optimization_score(self) -> int:
+        base = 12
+        score = base + sum(self.optimization_breakdown.values())
+        return max(0, min(100, score))
+
+    @property
+    def optimization_rating(self) -> str:
+        score = self.optimization_score
+        if score >= 90:
+            return "EXCELLENT CANDIDATE"
+        if score >= 75:
+            return "VERY GOOD CANDIDATE"
+        if score >= 60:
+            return "GOOD CANDIDATE"
+        if score >= 40:
+            return "WORTH REVIEWING"
+        return "ALREADY EFFICIENT"
+
+    @property
+    def score_colour(self) -> str:
+        score = self.optimization_score
+        if score >= 90:
+            return "#d35cff"
+        if score >= 75:
+            return "#70df7b"
+        if score >= 60:
+            return "#5db7ff"
+        if score >= 40:
+            return "#ffbd59"
+        return "#a59aa9"
+
+    @property
+    def visual_risk(self) -> str:
+        codec = self.video_codec.casefold()
+        if self.hdr_badge not in {"SDR", "UNKNOWN"}:
+            return "MEDIUM"
+        if codec in {"hevc", "h265", "av1"} and self.saving_percent >= 65:
+            return "MEDIUM"
+        if self.saving_percent >= 80:
+            return "MEDIUM"
+        return "LOW"
+
+    @property
+    def health_score(self) -> int:
+        """Convert the 100-point Optimization Score to one to five stars."""
+        score = self.optimization_score
+        if score >= 90:
+            return 5
+        if score >= 75:
+            return 4
+        if score >= 60:
+            return 3
+        if score >= 40:
+            return 2
+        return 1
+
+    @property
+    def health_stars(self) -> str:
+        return (
+            "" * self.health_score
+            + "" * (5 - self.health_score)
+        )
+
+    @property
+    def recommendation_reasons(self) -> list[str]:
+        reasons: list[str] = []
+        codec = self.video_codec.casefold()
+        saving_gib = self.saving / 1024**3
+        bitrate = self.bitrate_mbps
+
+        if codec in {"mpeg2video", "vc1", "mpeg4"}:
+            reasons.append(
+                f"Older {self.codec_badge} source usually compresses very well"
+            )
+        elif codec in {"h264", "avc"}:
+            reasons.append(
+                "H.264 source is a strong candidate for HEVC NVENC"
+            )
+        elif codec in {"hevc", "h265", "av1", "vp9"}:
+            reasons.append(
+                f"{self.codec_badge} is already a modern efficient codec"
+            )
+        elif self.video_codec:
+            reasons.append(f"Source codec: {self.codec_badge}")
+
+        if bitrate >= 35:
+            reasons.append(
+                f"Very high source bitrate ({bitrate:.1f} Mb/s)"
+            )
+        elif bitrate >= 18:
+            reasons.append(
+                f"High source bitrate ({bitrate:.1f} Mb/s)"
+            )
+        elif bitrate:
+            reasons.append(
+                f"Source bitrate is {bitrate:.1f} Mb/s"
             )
 
-        if (
-            codec in {"h264", "mpeg2video", "vc1", "mpeg4"}
-            and saving_gib >= 5
-        ):
-            return (
-                "GOOD CANDIDATE",
-                f"{self.video_text} should benefit from NVENC HEVC.",
+        if saving_gib >= 5:
+            reasons.append(
+                f"Manual target could recover about {saving_gib:.1f} GiB"
+            )
+        else:
+            reasons.append(
+                "Only a small amount of storage is expected to be recovered"
             )
 
-        if codec in {"hevc", "h265", "av1", "vp9"}:
-            if self.saving_percent < 45:
-                return (
-                    "ALREADY EFFICIENT",
-                    "Modern codec with a smaller expected benefit.",
-                )
-            return (
-                "REVIEW",
-                "Modern codec, but your manual target still saves space.",
+        if self.hdr_badge not in {"SDR", "UNKNOWN"}:
+            reasons.append(
+                f"{self.hdr_badge} detected  review quality after encoding"
             )
 
-        if saving_gib >= 3:
-            return (
-                "MODERATE",
-                "Worth considering based on your chosen target.",
-            )
+        if self.subtitle_count == 0:
+            reasons.append("No subtitle streams were detected")
 
-        return "LOW VALUE", "Only a small saving is expected."
+        return reasons[:5]
+
+    @property
+    def recommendation(self) -> tuple[str, str]:
+        reasons = self.recommendation_reasons
+        return (
+            self.optimization_rating,
+            reasons[0]
+            if reasons
+            else "Insufficient metadata for detailed reasoning.",
+        )
+
+
+    @property
+    def codec_badge(self) -> str:
+        labels = {
+            "hevc": "HEVC",
+            "h265": "HEVC",
+            "h264": "H.264",
+            "avc": "H.264",
+            "av1": "AV1",
+            "mpeg2video": "MPEG-2",
+            "vc1": "VC-1",
+            "vp9": "VP9",
+            "mpeg4": "MPEG-4",
+        }
+        return labels.get(
+            self.video_codec.casefold(),
+            self.video_codec.upper()
+            if self.video_codec
+            else "UNKNOWN",
+        )
+
+    @property
+    def resolution_badge(self) -> str:
+        if self.resolution_text == "2160p":
+            return "4K"
+        if self.height and self.height < 700:
+            return "DVD"
+        return self.resolution_text.upper()
+
+    @property
+    def hdr_badge(self) -> str:
+        value = self.hdr_format.strip()
+        return value.upper() if value else "SDR"
+
+    @property
+    def audio_badge(self) -> str:
+        labels = {
+            "truehd": "TRUEHD",
+            "dts": "DTS",
+            "eac3": "E-AC-3",
+            "ac3": "AC-3",
+            "aac": "AAC",
+            "flac": "FLAC",
+        }
+        return labels.get(
+            self.audio_codec.casefold(),
+            self.audio_codec.upper()
+            if self.audio_codec
+            else "AUDIO?",
+        )
+
+    @property
+    def subtitle_badge(self) -> str:
+        return (
+            f"{self.subtitle_count} SUB"
+            if self.subtitle_count
+            else "NO SUBS"
+        )
+
+    @property
+    def badges_text(self) -> str:
+        return "  ".join(
+            (
+                self.codec_badge,
+                self.resolution_badge,
+                self.hdr_badge,
+                self.audio_badge,
+                self.subtitle_badge,
+            )
+        )
 
     def apply_metadata(self, payload: dict) -> None:
         self.duration_seconds = float(
@@ -920,7 +1632,7 @@ class EncodeWorker(QRunnable):
         return value
 
     def run_handbrake(self, command: list[str]) -> None:
-        log("Running: " + subprocess.list2cmdline(command))
+        log("Running: " + subprocess.list2cmd1(command))
         process = subprocess.Popen(
             command,
             stdout=subprocess.PIPE,
@@ -929,19 +1641,26 @@ class EncodeWorker(QRunnable):
             encoding="utf-8",
             errors="replace",
             bufsize=1,
-            **hidden_process_kwargs(),
+            **hidden_process_kwargs()
         )
         assert process.stdout is not None
         for raw in process.stdout:
             line = raw.rstrip()
             log(line)
-            if "Encoding:" in line and "%" in line:
-                try:
-                    percent = float(line.split("%", 1)[0].rsplit(",", 1)[1].strip())
-                    eta = line.split("ETA ", 1)[1].rstrip(")") if "ETA " in line else "calculating"
-                    self.signals.progress.emit(int(percent), f"Encoding {percent:.1f}% — ETA {eta}")
-                except Exception:
-                    pass
+            if "Encoding:" in line:
+                # Use a regular expression to find the number before the %
+                # This prevents the "IndexError" and "ValueError" from bad strings.
+                match = re.search(r"(\d+(?:\.\d+)?)%", line)
+                if match:
+                    percent = float(match.group(1))
+                    eta = "calculating"
+                    if "ETA " in line:
+                        try:
+                            eta = line.split("ETA ", 1)[1].rstrip(")")
+                        except: pass
+                    self.signals.progress.emit(int(percent), f"Encoding {percent:.1f}%  ETA {eta}")
+        process.wait()
+
         code = process.wait()
         if code != 0:
             raise RuntimeError(f"HandBrake failed with exit code {code}.")
@@ -961,10 +1680,12 @@ class EncodeWorker(QRunnable):
             self.signals.message.emit(f"Copying {self.movie.title} from NAS to PC...")
             if not local_source.exists() or local_source.stat().st_size != source.stat().st_size:
                 local_source.unlink(missing_ok=True)
-                self.copy_with_progress(source, local_source, "NAS → PC")
+                self.copy_with_progress(source, local_source, "NAS  PC")
             duration = self.duration(local_source)
-            target_bytes = int(self.movie.target_gib * 0.96 * 1024**3)
-            total_kbps = target_bytes * 8 * 0.96 / duration / 1000
+            target_bytes = int(self.movie.target_gib * 1024**3)
+
+            # Reserve a little headroom so the finished file stays near the target size.
+            total_kbps = (target_bytes * 8 * 0.96) / (duration / 1000)
             video_kbps = int(total_kbps - int(self.config["audio_kbps"]))
             if video_kbps < 500:
                 raise RuntimeError("The selected target size is too small for this movie.")
@@ -992,7 +1713,7 @@ class EncodeWorker(QRunnable):
             partial.unlink(missing_ok=True)
             self.signals.stage.emit("upload")
             self.signals.message.emit("Copying optimized movie back to NAS...")
-            self.copy_with_progress(local_output, partial, "PC → NAS")
+            self.copy_with_progress(local_output, partial, "PC  NAS")
             self.signals.stage.emit("verifying")
             if partial.stat().st_size != local_output.stat().st_size:
                 raise RuntimeError("NAS copy verification failed.")
@@ -1075,8 +1796,8 @@ class SparklineWidget(QWidget):
             return f"{self.current_value:.0f}%"
         if self.unit == "MB/s":
             return f"{self.current_value:.1f} MB/s"
-        if self.unit == "°C":
-            return f"{self.current_value:.0f}°C"
+        if self.unit == "C":
+            return f"{self.current_value:.0f}C"
         if self.unit == "GB":
             return f"{self.current_value:.1f} GB"
         return f"{self.current_value:.1f} {self.unit}"
@@ -1218,15 +1939,15 @@ class LiveTelemetryPanel(QFrame):
         remaining: int,
     ):
         self.current_job.setText(
-            f"{movie_title}  •  {remaining} remaining"
+            f"{movie_title}    {remaining} remaining"
         )
 
     def begin_stage(self, stage: str):
         self.stage_name = stage
         labels = {
-            "download": "VAULTONE → PC",
+            "download": "VAULTONE  PC",
             "encoding": "NVENC ENCODING",
-            "upload": "PC → VAULTONE",
+            "upload": "PC  VAULTONE",
             "verifying": "VERIFYING",
             "complete": "COMPLETE",
         }
@@ -1313,7 +2034,7 @@ class LiveTelemetryPanel(QFrame):
             self.previous_network = None
             self.previous_network_by_adapter = {}
             self.secondary_status.setText(
-                "Network telemetry unavailable — install psutil"
+                "Network telemetry unavailable  install psutil"
             )
             return
 
@@ -1489,7 +2210,7 @@ class LiveTelemetryPanel(QFrame):
             self.active_graph.set_value(download)
             if not self.network_available:
                 self.secondary_status.setText(
-                    "Network telemetry unavailable — psutil is missing"
+                    "Network telemetry unavailable  psutil is missing"
                 )
             elif adapter:
                 self.secondary_status.setText(
@@ -1504,7 +2225,7 @@ class LiveTelemetryPanel(QFrame):
             self.active_graph.set_value(upload)
             if not self.network_available:
                 self.secondary_status.setText(
-                    "Network telemetry unavailable — psutil is missing"
+                    "Network telemetry unavailable  psutil is missing"
                 )
             elif adapter:
                 self.secondary_status.setText(
@@ -1519,13 +2240,13 @@ class LiveTelemetryPanel(QFrame):
             encoder, general, temperature = self.nvidia_metrics()
             self.active_graph.set_value(encoder)
             temperature_text = (
-                f" • {temperature:.0f}°C"
+                f"  {temperature:.0f}C"
                 if temperature
                 else ""
             )
             self.secondary_status.setText(
                 f"Video Encode {encoder:.0f}%"
-                f" • GPU Core {general:.0f}%"
+                f"  GPU Core {general:.0f}%"
                 f"{temperature_text}"
             )
 
@@ -1610,7 +2331,7 @@ class OperationsMetric(QFrame):
     def __init__(
         self,
         title: str,
-        value: str = "—",
+        value: str = "",
         detail: str = "",
         parent=None,
     ):
@@ -1670,7 +2391,7 @@ class OperationsCenterPanel(QFrame):
         title = QLabel("OPERATIONS CENTER")
         title.setObjectName("operationsTitle")
         subtitle = QLabel(
-            "Compact health lights — hover any light for details"
+            "Compact health lights  hover any light for details"
         )
         subtitle.setObjectName("operationsSubtitle")
         title_box.addWidget(title)
@@ -1682,7 +2403,7 @@ class OperationsCenterPanel(QFrame):
         self.last_refresh.setObjectName("operationsRefresh")
         heading_row.addWidget(self.last_refresh)
 
-        refresh_button = QPushButton("↻ REFRESH")
+        refresh_button = QPushButton(" REFRESH")
         refresh_button.clicked.connect(self.refresh_services)
         heading_row.addWidget(refresh_button)
         outer.addLayout(heading_row)
@@ -1722,7 +2443,7 @@ class OperationsCenterPanel(QFrame):
         )
         self.free_metric = OperationsMetric(
             "FREE SPACE",
-            "—",
+            "",
             "Configured movie library",
         )
 
@@ -1740,14 +2461,14 @@ class OperationsCenterPanel(QFrame):
         self.current_status.setObjectName("operationsCurrent")
         action_row.addWidget(self.current_status, 1)
 
-        scan_button = QPushButton("☠  SCAN")
+        scan_button = QPushButton("  SCAN")
         scan_button.setObjectName("primaryButton")
         scan_button.clicked.connect(
             self.scan_requested.emit
         )
         action_row.addWidget(scan_button)
 
-        start_button = QPushButton("▶  START PROCESS")
+        start_button = QPushButton("  START PROCESS")
         start_button.setObjectName("startButton")
         start_button.clicked.connect(
             self.start_requested.emit
@@ -1787,131 +2508,313 @@ class OperationsCenterPanel(QFrame):
         )
 
     def refresh_services(self):
-        root = Path(
-            str(self.config.get("movie_root", "")).strip()
-        )
+        # 1. NAS Check
+        root = Path(str(self.config.get("movie_root", "")).strip())
         nas_ok = root.exists()
-
         if nas_ok:
             try:
                 free = shutil.disk_usage(root).free
                 free_text = human_size(free)
-                nas_state = (
-                    "good"
-                    if free > 100 * 1024**3
-                    else "warning"
-                )
-                self.nas_status.set_status(
-                    nas_state,
-                    f"NAS: Connected\n"
-                    f"Library: {root}\n"
-                    f"Free space: {free_text}",
-                )
-                self.free_metric.update_value(
-                    free_text,
-                    "Available on the library volume",
-                    nas_state,
-                )
+                nas_state = "good" if free > 100 * 1024**3 else "warning"
+                self.nas_status.set_status(nas_state, f"NAS: Connected\nLibrary: {root}\nFree space: {free_text}")
+                self.free_metric.update_value(free_text, "Available on the library volume", nas_state)
             except OSError as exc:
-                self.nas_status.set_status(
-                    "warning",
-                    f"NAS: Connected, but free space could not "
-                    f"be read.\n{exc}",
-                )
-                self.free_metric.update_value(
-                    "UNKNOWN",
-                    str(exc),
-                    "warning",
-                )
+                self.nas_status.set_status("bad", f"NAS: Connected, but space is unreadable\n{exc}")
+                self.free_metric.update_value("ERROR", str(exc), "bad")
         else:
-            self.nas_status.set_status(
-                "bad",
-                f"NAS: Library unavailable\n"
-                f"Configured path: {root or 'Not configured'}",
-            )
-            self.free_metric.update_value(
-                "—",
-                "NAS library is unavailable",
-                "bad",
-            )
+            self.nas_status.set_status("bad", f"NAS: Not Found\nPath: {root}")
+            self.free_metric.update_value("", "NAS library is missing", "bad")
 
-        jellyfin_ok, jellyfin_detail = test_jellyfin(
-            self.config
-        )
-        self.jellyfin_status.set_status(
-            "good" if jellyfin_ok else "bad",
-            (
-                "Jellyfin: Connected\n"
-                if jellyfin_ok
-                else "Jellyfin: Connection failed\n"
-            )
-            + jellyfin_detail,
-        )
+        # 2. Jellyfin Check
+        jellyfin_ok = False
+        jelly_detail = ""
+        j_url = str(self.config.get("jellyfin_url", "")).strip().rstrip("/")
+        j_key = str(self.config.get("jellyfin_api_key", "")).strip()
+        if j_url and j_key:
+            try:
+                # We use a simple try block to ensure we always get a status result
+                res = urllib.request.urlopen(f"{j_url}/System/Info?api_key={j_key}", 
+                                              headers={"Accept": "application/json"}, timeout=5)
+                data = json.loads(res.read().decode("utf-8"))
+                jellyfin_ok = True
+                j_detail = f"Connected to {data.get('ServerName', 'Jellyfin')}"
+            except Exception as e:
+                j_detail = str(e)
+        
+        # This ENSURES the light turns red if it fails, instead of staying gray
+        self.jellyfin_status.set_status("good" if jellyfin_ok else "bad", f"Jellyfin: {'Online' if jellyfin_ok else 'Offline'}\n{j_detail}")
 
-        handbrake_path = shutil.which(
-            self.config.get(
-                "handbrake",
-                "HandBrakeCLI",
-            )
-        )
-        self.handbrake_status.set_status(
-            "good" if handbrake_path else "bad",
-            (
-                f"HandBrake: Ready\n{handbrake_path}"
-                if handbrake_path
-                else "HandBrake: HandBrakeCLI was not found"
-            ),
-        )
+        # 3. HandBrake Check
+        hb_path = shutil.which(self.config.get("handbrake", "HandBrakeCLI"))
+        if hb_path:
+            self.handbrake_status.set_status("good", f"HandBrake Ready\nPath: {hb_path}")
+        else:
+            self.handbrake_status.set_status("bad", "HandBrake_CLI not found in PATH")
 
+        # 4. GPU Check
         gpu_ok = False
-        gpu_detail = "nvidia-smi was not found"
+        gpu_detail = "N/A"
         try:
-            result = subprocess.run(
-                [
-                    "nvidia-smi",
-                    "--query-gpu=name,driver_version",
-                    "--format=csv,noheader",
-                ],
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=4,
-                creationflags=(
-                    subprocess.CREATE_NO_WINDOW
-                    if os.name == "nt"
-                    else 0
-                ),
-                check=False,
-            )
-            if result.returncode == 0 and result.stdout.strip():
+            # Check if nvidia-smi is even available
+            res = subprocess.run(["nvidia-smi"], capture_output=True, timeout=3)
+            if res.returncode == 0:
                 gpu_ok = True
-                gpu_detail = (
-                    result.stdout.strip().splitlines()[0]
-                )
+                gpu_detail = "NVENC Ready"
+            else:
+                gpu_detail = "NVENC found but not responding"
+        except:
+            gpu_detail = "No NVENC detected"
+
+        self.gpu_status.set_status("good" if gpu_ok else "bad", f"GPU: {gpu_detail}")
+
+        self.last_refresh.setText("Checked " + time.strftime("%H:%M:%S"))
+
+
+
+
+
+def find_handbrake_cli(configured: str = "") -> tuple[str, str]:
+    """Return (path/command, version). Empty values mean HandBrakeCLI was not found."""
+    candidates = []
+    if configured:
+        candidates.append(configured)
+    resolved = shutil.which("HandBrakeCLI") or shutil.which("HandBrakeCLI.exe")
+    if resolved:
+        candidates.append(resolved)
+    if os.name == "nt":
+        for base in (os.environ.get("ProgramFiles"), os.environ.get("ProgramFiles(x86)"), os.environ.get("LOCALAPPDATA")):
+            if base:
+                candidates.extend([
+                    str(Path(base) / "HandBrake" / "HandBrakeCLI.exe"),
+                    str(Path(base) / "Programs" / "HandBrake" / "HandBrakeCLI.exe"),
+                ])
+    seen = set()
+    for candidate in candidates:
+        if not candidate or candidate in seen:
+            continue
+        seen.add(candidate)
+        path = shutil.which(candidate) or candidate
+        if not Path(path).exists() and not shutil.which(path):
+            continue
+        try:
+            result = subprocess.run([path, "--version"], capture_output=True, text=True, timeout=8, **hidden_process_kwargs())
+            output = (result.stdout or result.stderr or "").strip().splitlines()
+            if result.returncode == 0 and output:
+                return str(path), output[0]
+        except Exception:
+            continue
+    return "", ""
+
+
+def detected_network_locations() -> list[str]:
+    locations = []
+    if os.name == "nt":
+        try:
+            result = subprocess.run(["net", "use"], capture_output=True, text=True, timeout=6, **hidden_process_kwargs())
+            for line in result.stdout.splitlines():
+                m = re.search(r'(\\\\[^\\\s]+\\[^\s]+)', line)
+                if m:
+                    locations.append(m.group(1))
+        except Exception:
+            pass
+    return list(dict.fromkeys(locations))
+
+
+class PlatformSetupWizard(QWizard):
+    HANDBRAKE_URL = "https://handbrake.fr/downloads.php"
+
+    def __init__(self, config: dict, parent=None, first_run: bool = False):
+        super().__init__(parent)
+        self.config = config.copy()
+        self.first_run = first_run
+        self.setWindowTitle("Evil's Media Encoding Platform  Platform Builder")
+        self.setWizardStyle(QWizard.WizardStyle.ModernStyle)
+        self.resize(860, 650)
+        self.setOption(QWizard.WizardOption.NoBackButtonOnStartPage, True)
+        self.setButtonText(QWizard.WizardButton.FinishButton, "BUILD MY PLATFORM")
+        self._build_pages()
+        self.currentIdChanged.connect(self._page_changed)
+
+    def heading(self, title: str, text: str) -> tuple[QLabel, QLabel]:
+        h = QLabel(title); h.setStyleSheet("font-size:26px;font-weight:900;color:#d35cff;")
+        b = QLabel(text); b.setWordWrap(True); b.setStyleSheet("font-size:14px;color:#d6ceda;")
+        return h, b
+
+    def _build_pages(self):
+        welcome = QWizardPage(); welcome.setTitle("")
+        layout = QVBoxLayout(welcome)
+        h,b=self.heading("EVIL'S MEDIA ENCODING PLATFORM", "Professional media encoding and workflow automation. Let's build the platform around the way your media actually lives.")
+        layout.addStretch(); layout.addWidget(h); layout.addWidget(b)
+        badge=QLabel("POWERED BY EMO    PLATFORM 5.0 PREVIEW"); badge.setStyleSheet("font-weight:800;color:#8d8292;margin-top:16px;"); layout.addWidget(badge)
+        layout.addStretch(); self.addPage(welcome)
+
+        hb = QWizardPage(); hb.setTitle("HandBrake")
+        l=QVBoxLayout(hb); h,b=self.heading("ENCODER CHECK", "EMP uses HandBrakeCLI as its encoding engine. We'll find it automatically and verify that it runs."); l.addWidget(h); l.addWidget(b)
+        self.hb_status=QLabel("Checking"); self.hb_status.setWordWrap(True); self.hb_status.setStyleSheet("font-size:17px;font-weight:800;padding:18px;background:#111018;border:1px solid #35243e;border-radius:8px;"); l.addWidget(self.hb_status)
+        row=QHBoxLayout(); self.hb_browse=QPushButton("BROWSE FOR HANDBRAKECLI"); self.hb_browse.clicked.connect(self._browse_handbrake); row.addWidget(self.hb_browse)
+        self.hb_download=QPushButton("OPEN OFFICIAL HANDBRAKE DOWNLOAD"); self.hb_download.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(self.HANDBRAKE_URL))); row.addWidget(self.hb_download); l.addLayout(row)
+        self.hb_path=QLineEdit(self.config.get("handbrake","HandBrakeCLI")); self.hb_path.setPlaceholderText("HandBrakeCLI.exe path"); l.addWidget(self.hb_path); l.addStretch(); self.addPage(hb)
+
+        flow=QWizardPage(); flow.setTitle("Workflow"); l=QVBoxLayout(flow); h,b=self.heading("HOW SHOULD EMP WORK?", "Choose the picture that best matches your setup. You can run this Platform Builder again from Settings at any time."); l.addWidget(h); l.addWidget(b)
+        self.flow_group=QButtonGroup(self); self.flow_buttons={}
+        choices=[
+            ("nas_pc_nas","NAS + THIS PC    Recommended","Media stays on your NAS. EMP copies one job to this PC, encodes locally, verifies it, and sends it back.",True),
+            ("local","JUST THIS PC","Media and encoding both live on this computer.",True),
+            ("remote_server","DEDICATED ENCODING SERVER","Another computer/server performs the encode. Configuration is saved in this preview; remote-worker execution is the next platform module.",False),
+            ("nas_native","NAS DOES EVERYTHING","Run encoding on the NAS itself. Configuration is saved in this preview; NAS-native execution requires the remote-worker module.",False),
+        ]
+        current=self.config.get("workflow_mode","nas_pc_nas")
+        for key,title,desc,ready in choices:
+            rb=QRadioButton(f"{title}\n{desc}" + ("" if ready else "\n[PLATFORM MODE  worker backend pending]")); rb.setStyleSheet("QRadioButton{padding:12px;font-size:14px;} QRadioButton::indicator{width:18px;height:18px;}"); self.flow_group.addButton(rb); self.flow_buttons[key]=rb; l.addWidget(rb)
+            if key==current: rb.setChecked(True)
+        if not any(x.isChecked() for x in self.flow_buttons.values()): self.flow_buttons["nas_pc_nas"].setChecked(True)
+        l.addStretch(); self.addPage(flow)
+
+        paths=QWizardPage(); paths.setTitle("Locations"); l=QVBoxLayout(paths); h,b=self.heading("YOUR MEDIA LOCATIONS", "Tell EMP where media starts, where finished media belongs, and where this PC may work temporarily. Use Test to check access."); l.addWidget(h); l.addWidget(b)
+        form=QFormLayout()
+        self.source_edit=QLineEdit(self.config.get("movie_root","")); form.addRow("Where are your movies?", self._path_row(self.source_edit,"source"))
+        self.output_edit=QLineEdit(self.config.get("output_root",self.config.get("movie_root",""))); form.addRow("Where should finished movies go?", self._path_row(self.output_edit,"output"))
+        self.work_edit=QLineEdit(self.config.get("local_work",r"C:\Evil Media Optimizer Work")); form.addRow("Where should EMP work?", self._path_row(self.work_edit,"work"))
+        l.addLayout(form)
+        self.path_status=QLabel("Tip: an SSD/NVMe is recommended for EMP's work folder."); self.path_status.setWordWrap(True); l.addWidget(self.path_status)
+        find_net=QPushButton("FIND NETWORK LOCATIONS"); find_net.clicked.connect(self._show_network_locations); l.addWidget(find_net); l.addStretch(); self.addPage(paths)
+
+        media=QWizardPage(); media.setTitle("Media Server"); l=QVBoxLayout(media); h,b=self.heading("MEDIA SERVER", "If you use a media server, EMP can keep its connection details with the platform configuration. Jellyfin integration already exists; Plex and Emby are staged for later modules."); l.addWidget(h); l.addWidget(b)
+        self.server_group=QButtonGroup(self); self.server_buttons={}
+        for name in ("Jellyfin","Plex","Emby","None"):
+            rb=QRadioButton(name); self.server_group.addButton(rb); self.server_buttons[name]=rb; l.addWidget(rb)
+        self.server_buttons.get(self.config.get("media_server_type","Jellyfin"), self.server_buttons["None"]).setChecked(True)
+        self.jf_url=QLineEdit(self.config.get("jellyfin_url","")); self.jf_url.setPlaceholderText("Jellyfin URL - e.g. http://server:8096"); l.addWidget(self.jf_url)
+        jf_form=QFormLayout()
+        self.jf_username=QLineEdit(self.config.get("jellyfin_username", "")); self.jf_username.setPlaceholderText("Jellyfin username"); jf_form.addRow("Username:", self.jf_username)
+        self.jf_password=QLineEdit(); self.jf_password.setEchoMode(QLineEdit.EchoMode.Password); self.jf_password.setPlaceholderText("Used once - EMP does not save this password"); jf_form.addRow("Password:", self.jf_password)
+        self.jf_connect=QPushButton("CONNECT TO JELLYFIN"); self.jf_connect.clicked.connect(self._connect_jellyfin); jf_form.addRow("", self.jf_connect)
+        self.jf_connect_status=QLabel("EMP can sign in once with an administrator account and retrieve/create its own persistent Jellyfin API key. You can still use an existing API key later in Settings."); self.jf_connect_status.setWordWrap(True); jf_form.addRow("Status:", self.jf_connect_status)
+        l.addLayout(jf_form)
+        l.addStretch(); self.addPage(media)
+
+        review=QWizardPage(); review.setTitle("Build"); l=QVBoxLayout(review); h,b=self.heading("BUILDING YOUR PLATFORM", "EMP will save this as your active platform profile. You can change any of it later from Settings  Platform Setup."); l.addWidget(h); l.addWidget(b)
+        self.review=QLabel(); self.review.setWordWrap(True); self.review.setTextFormat(Qt.TextFormat.RichText); self.review.setStyleSheet("font-size:14px;padding:18px;background:#111018;border:1px solid #35243e;border-radius:8px;"); l.addWidget(self.review); l.addStretch(); self.addPage(review)
+
+    def _path_row(self, edit, role):
+        w=QWidget(); row=QHBoxLayout(w); row.setContentsMargins(0,0,0,0); row.addWidget(edit,1)
+        browse=QPushButton("Browse"); browse.clicked.connect(lambda _=False,e=edit: self._browse_folder(e)); row.addWidget(browse)
+        test=QPushButton("Test"); test.clicked.connect(lambda _=False,e=edit,r=role: self._test_path(e,r)); row.addWidget(test)
+        return w
+
+    def _browse_folder(self, edit):
+        folder=QFileDialog.getExistingDirectory(self,"Choose location",edit.text() or str(Path.home()))
+        if folder: edit.setText(folder)
+
+    def _browse_handbrake(self):
+        path,_=QFileDialog.getOpenFileName(self,"Find HandBrakeCLI",str(Path.home()),"HandBrakeCLI (HandBrakeCLI.exe HandBrakeCLI);;All files (*)")
+        if path: self.hb_path.setText(path); self._check_handbrake(path)
+
+    def _check_handbrake(self, configured=None):
+        path,version=find_handbrake_cli(configured or self.hb_path.text().strip())
+        if path:
+            self.hb_path.setText(path); self.hb_status.setText(f" HandBrakeCLI detected\n{version}\n{path}"); self.hb_status.setStyleSheet("font-size:17px;font-weight:800;padding:18px;background:#0a170d;border:1px solid #2f7d3f;border-radius:8px;color:#70df7b;")
+        else:
+            self.hb_status.setText(" HandBrakeCLI was not found. Install HandBrake from the official site, then return here and click Browse or Next to re-check."); self.hb_status.setStyleSheet("font-size:17px;font-weight:800;padding:18px;background:#190b0d;border:1px solid #8d3340;border-radius:8px;color:#ff6879;")
+        return bool(path)
+
+    def _test_path(self, edit, role):
+        raw=edit.text().strip()
+        if not raw:
+            self.path_status.setText(" Choose a location first."); return
+        p=Path(raw)
+        try:
+            if role=="work": p.mkdir(parents=True,exist_ok=True)
+            exists=p.exists(); writable=False
+            if exists and p.is_dir():
+                probe=p/".emp_write_test.tmp"
+                try: probe.write_text("EMP",encoding="utf-8"); probe.unlink(); writable=True
+                except Exception: writable=False
+            free=""
+            try: free=f"  {shutil.disk_usage(p).free/(1024**3):.1f} GiB free"
+            except Exception: pass
+            self.path_status.setText(("" if exists else "")+f" {raw}  " + ("write access" if writable else "read-only/unavailable")+free)
         except Exception as exc:
-            gpu_detail = str(exc)
+            self.path_status.setText(f" {exc}")
 
-        self.gpu_status.set_status(
-            "good" if gpu_ok else "bad",
-            (
-                f"GPU: NVENC ready\n{gpu_detail}"
-                if gpu_ok
-                else f"GPU: NVIDIA telemetry unavailable\n"
-                f"{gpu_detail}"
-            ),
+    def _show_network_locations(self):
+        found=detected_network_locations()
+        text="\n".join(found) if found else "No mapped UNC shares were reported by Windows. You can still type a path such as \\\\NAS\\Movies or use Browse if the share is mounted."
+        QMessageBox.information(self,"Network locations",text)
+
+    def _selected_flow(self):
+        for key,button in self.flow_buttons.items():
+            if button.isChecked(): return key
+        return "nas_pc_nas"
+
+    def _selected_server(self):
+        for name,button in self.server_buttons.items():
+            if button.isChecked(): return name
+        return "None"
+
+    def _connect_jellyfin(self):
+        self.jf_connect_status.setText("Connecting to Jellyfin...")
+        QApplication.processEvents()
+        ok, detail, token, device_id = authenticate_jellyfin(
+            self.jf_url.text(),
+            self.jf_username.text(),
+            self.jf_password.text(),
+            device_id=self.config.get("jellyfin_device_id", ""),
         )
-
-        self.last_refresh.setText(
-            "Checked " + time.strftime("%H:%M:%S")
+        self.jf_connect_status.setText((" " if ok else " ") + detail)
+        self.jf_connect_status.setStyleSheet(
+            "color:#78e286;font-weight:700;" if ok else "color:#ff6879;font-weight:700;"
         )
+        if ok:
+            self.config["jellyfin_api_key"] = token
+            self.config["jellyfin_device_id"] = device_id
+            self.config["jellyfin_username"] = self.jf_username.text().strip()
+            self.jf_password.clear()
 
+    def _page_changed(self, page_id):
+        if page_id==1: self._check_handbrake()
+        if page_id==5:
+            flow=self._selected_flow(); ready=flow in {"nas_pc_nas","local"}
+            self.review.setText(
+                f"<b>Workflow:</b> {flow.replace('_',' ').title()} {' ready now' if ready else ' worker backend pending'}<br><br>"
+                f"<b>HandBrake:</b> {self.hb_path.text().strip() or 'Not found'}<br>"
+                f"<b>Media source:</b> {self.source_edit.text().strip() or 'Not set'}<br>"
+                f"<b>Finished media:</b> {self.output_edit.text().strip() or 'Not set'}<br>"
+                f"<b>EMP work area:</b> {self.work_edit.text().strip() or 'Not set'}<br>"
+                f"<b>Media server:</b> {self._selected_server()}"
+            )
+
+    def validateCurrentPage(self):
+        if self.currentId()==1 and not self._check_handbrake():
+            answer=QMessageBox.question(self,"HandBrake required","HandBrakeCLI is not available yet. Open the official HandBrake download page now?",QMessageBox.StandardButton.Yes|QMessageBox.StandardButton.No)
+            if answer==QMessageBox.StandardButton.Yes: QDesktopServices.openUrl(QUrl(self.HANDBRAKE_URL))
+            return False
+        if self.currentId()==3:
+            if not self.source_edit.text().strip() or not self.work_edit.text().strip():
+                QMessageBox.warning(self,"Locations needed","Choose at least your media source and EMP work location."); return False
+        return super().validateCurrentPage()
+
+    def values(self):
+        return {
+            **self.config,
+            "setup_complete": True,
+            "workflow_mode": self._selected_flow(),
+            "handbrake": self.hb_path.text().strip() or "HandBrakeCLI",
+            "movie_root": self.source_edit.text().strip(),
+            "output_root": self.output_edit.text().strip() or self.source_edit.text().strip(),
+            "local_work": self.work_edit.text().strip(),
+            "media_server_type": self._selected_server(),
+            "jellyfin_url": self.jf_url.text().strip().rstrip("/"),
+            "jellyfin_username": self.jf_username.text().strip(),
+            "jellyfin_api_key": self.config.get("jellyfin_api_key", ""),
+            "jellyfin_device_id": self.config.get("jellyfin_device_id", ""),
+        }
 
 
 class SettingsDialog(QDialog):
     def __init__(self, config: dict, parent=None):
         super().__init__(parent)
-        self.setWindowTitle(f"{APP_NAME} — Settings")
+        self.setWindowTitle(f"{APP_NAME}  Settings")
         self.resize(760, 560)
         self.config = config.copy()
         outer = QVBoxLayout(self)
@@ -1933,6 +2836,10 @@ class SettingsDialog(QDialog):
         general_form.addRow("Scan movies larger than (GiB):", self.minimum)
         self.default_target = QSpinBox(); self.default_target.setRange(1, 100); self.default_target.setValue(int(self.config["default_target_gib"]))
         general_form.addRow("Default target (GiB):", self.default_target)
+        self.platform_setup_button = QPushButton("RUN PLATFORM SETUP WIZARD")
+        self.platform_setup_button.setObjectName("primaryButton")
+        self.platform_setup_button.clicked.connect(self.run_platform_setup)
+        general_form.addRow("Platform setup:", self.platform_setup_button)
         tabs.addTab(general, "General")
 
         encoding = QWidget()
@@ -2022,13 +2929,26 @@ class SettingsDialog(QDialog):
         )
         integration_form.addRow("Jellyfin URL:", self.jellyfin_url)
 
+        self.jellyfin_username = QLineEdit(self.config.get("jellyfin_username", ""))
+        self.jellyfin_username.setPlaceholderText("Jellyfin username")
+        integration_form.addRow("Jellyfin username:", self.jellyfin_username)
+
+        self.jellyfin_password = QLineEdit()
+        self.jellyfin_password.setEchoMode(QLineEdit.EchoMode.Password)
+        self.jellyfin_password.setPlaceholderText("Used only while connecting - never saved")
+        integration_form.addRow("Jellyfin password:", self.jellyfin_password)
+
+        self.connect_jellyfin_button = QPushButton("CONNECT TO JELLYFIN")
+        self.connect_jellyfin_button.clicked.connect(self.connect_jellyfin)
+        integration_form.addRow("", self.connect_jellyfin_button)
+
         key_row = QHBoxLayout()
         self.jellyfin_api_key = QLineEdit(
             self.config.get("jellyfin_api_key", "")
         )
         self.jellyfin_api_key.setEchoMode(QLineEdit.EchoMode.Password)
         self.jellyfin_api_key.setPlaceholderText(
-            "Dashboard → Advanced → API Keys"
+            "Automatically filled by Connect to Jellyfin, or paste an existing API key"
         )
         key_row.addWidget(self.jellyfin_api_key, 1)
 
@@ -2055,14 +2975,14 @@ class SettingsDialog(QDialog):
         integration_form.addRow("", self.test_jellyfin_button)
 
         self.jellyfin_test_result = QLabel(
-            "Enter the URL and API key, then test the connection."
+            "Use Connect to Jellyfin for automatic setup, or enter an existing API key and test it."
         )
         self.jellyfin_test_result.setWordWrap(True)
         integration_form.addRow("Status:", self.jellyfin_test_result)
 
         note = QLabel(
-            "Posters are downloaded from Jellyfin and cached locally. "
-            "The API key is stored in this app folder's config.json."
+            "Connect to Jellyfin signs in once and saves only the returned EMP access token. "
+            "Your Jellyfin password is never written to config.json. Existing API keys remain supported."
         )
         note.setWordWrap(True)
         integration_form.addRow(note)
@@ -2085,13 +3005,18 @@ class SettingsDialog(QDialog):
         )
         updates_layout.addWidget(version_label)
 
+        self.github_repo = QLineEdit(self.config.get("github_repo", ""))
+        self.github_repo.setPlaceholderText("owner/repository  (example: EvildeadNZ/EMO)")
+        updates_layout.addWidget(QLabel("GitHub release repository:"))
+        updates_layout.addWidget(self.github_repo)
+        github_note = QLabel("EMP checks this repository's latest GitHub Release when the dashboard opens. The release should contain the EMP update ZIP as an asset.")
+        github_note.setWordWrap(True); updates_layout.addWidget(github_note)
+
         self.update_manifest_url = QLineEdit(
             self.config.get("update_manifest_url", "")
         )
-        self.update_manifest_url.setPlaceholderText(
-            "Optional future update-manifest URL"
-        )
-        updates_layout.addWidget(QLabel("Automatic update source:"))
+        self.update_manifest_url.setPlaceholderText("Legacy/custom manifest URL (optional)")
+        updates_layout.addWidget(QLabel("Custom update source:"))
         updates_layout.addWidget(self.update_manifest_url)
 
         install_zip = QPushButton("INSTALL UPDATE FROM ZIP...")
@@ -2109,18 +3034,87 @@ class SettingsDialog(QDialog):
         tabs.addTab(updates, "Updates")
 
         appearance = QWidget()
-        appearance_layout = QVBoxLayout(appearance)
-        appearance_layout.addWidget(QLabel(
-            "Active theme: Skull Purple\n\n"
-            "Planned themes: Diablo, Jellyfin, OLED Black, Matrix and Cyberpunk."
-        ))
-        appearance_layout.addStretch()
+        appearance_form = QFormLayout(appearance)
+
+        self.theme = QComboBox()
+        self.theme.addItems(list(THEME_PALETTES))
+        self.theme.setCurrentText(
+            self.config.get("theme", "Skull Purple")
+        )
+        appearance_form.addRow("Application theme:", self.theme)
+
+        self.banner_theme = QComboBox()
+        self.banner_theme.addItems(["Original Purple", "Red Ember"])
+        self.banner_theme.setCurrentText(self.config.get("banner_theme", "Original Purple"))
+        appearance_form.addRow("Banner style:", self.banner_theme)
+
+        banner_note = QLabel(
+            "Choose the artwork shown across the top of EMP. Original Purple keeps the classic skull banner; "
+            "Red Ember adds the new red/black skull banner. Your choice is saved, and more banner packs can be added later."
+        )
+        banner_note.setWordWrap(True)
+        appearance_form.addRow("", banner_note)
+
+        scale_row = QHBoxLayout()
+        self.ui_scale = QSlider(Qt.Orientation.Horizontal)
+        self.ui_scale.setRange(85, 150)
+        self.ui_scale.setSingleStep(5)
+        self.ui_scale.setPageStep(10)
+        self.ui_scale.setTickInterval(5)
+        self.ui_scale.setTickPosition(QSlider.TickPosition.TicksBelow)
+        self.ui_scale.setValue(int(self.config.get("ui_scale_percent", 100)))
+        self.ui_scale_value = QLabel(f"{self.ui_scale.value()}%")
+        self.ui_scale_value.setMinimumWidth(48)
+        self.ui_scale_value.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self.ui_scale.valueChanged.connect(lambda value: self.ui_scale_value.setText(f"{value}%"))
+        scale_row.addWidget(self.ui_scale, 1)
+        scale_row.addWidget(self.ui_scale_value)
+        scale_widget = QWidget(); scale_widget.setLayout(scale_row)
+        appearance_form.addRow("UI text size:", scale_widget)
+
+        scale_note = QLabel(
+            "100% is the normal EMP size. Increase this if labels, buttons, tables or status text are difficult to read. "
+            "The setting applies after Save and is remembered for future launches."
+        )
+        scale_note.setWordWrap(True)
+        appearance_form.addRow("", scale_note)
+
+        theme_note = QLabel(
+            "The selected theme is applied after you click Save. "
+            "It changes the full interface while keeping status colours "
+            "consistent and readable."
+        )
+        theme_note.setWordWrap(True)
+        appearance_form.addRow(theme_note)
+
+        theme_list = QLabel(
+            "Included themes:\n"
+            "Skull Purple  OLED Black  Diablo Ember  Jellyfin Violet  "
+            "Matrix Green  Cyberpunk Neon  Blood Moon  Arctic Blue  "
+            "Toxic Lime  Retro Amber  Steel Grey"
+        )
+        theme_list.setWordWrap(True)
+        appearance_form.addRow("Available:", theme_list)
+
         tabs.addTab(appearance, "Appearance")
 
         outer.addWidget(tabs)
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(self.accept); buttons.rejected.connect(self.reject)
         outer.addWidget(buttons)
+
+    def run_platform_setup(self):
+        wizard = PlatformSetupWizard(self.values(), self, first_run=False)
+        if wizard.exec() == QDialog.DialogCode.Accepted:
+            updated = wizard.values()
+            self.config.update(updated)
+            self.root.setText(updated.get("movie_root", self.root.text()))
+            self.work.setText(updated.get("local_work", self.work.text()))
+            self.handbrake.setText(updated.get("handbrake", self.handbrake.text()))
+            self.jellyfin_url.setText(updated.get("jellyfin_url", self.jellyfin_url.text()))
+            self.jellyfin_username.setText(updated.get("jellyfin_username", self.jellyfin_username.text()))
+            self.jellyfin_api_key.setText(updated.get("jellyfin_api_key", self.jellyfin_api_key.text()))
+            QMessageBox.information(self, "Platform setup", "Platform settings loaded into this Settings window. Click Save to apply them.")
 
     def browse_root(self):
         folder = QFileDialog.getExistingDirectory(self, "Choose movie library", self.root.text())
@@ -2130,12 +3124,33 @@ class SettingsDialog(QDialog):
         folder = QFileDialog.getExistingDirectory(self, "Choose local work folder", self.work.text())
         if folder: self.work.setText(folder)
 
+    def connect_jellyfin(self):
+        self.jellyfin_test_result.setText("Connecting to Jellyfin...")
+        QApplication.processEvents()
+        ok, detail, token, device_id = authenticate_jellyfin(
+            self.jellyfin_url.text(),
+            self.jellyfin_username.text(),
+            self.jellyfin_password.text(),
+            device_id=self.config.get("jellyfin_device_id", ""),
+        )
+        self.jellyfin_test_result.setText((" " if ok else " ") + detail)
+        self.jellyfin_test_result.setStyleSheet(
+            "color:#78e286;font-weight:700;" if ok else "color:#ff6879;font-weight:700;"
+        )
+        if ok:
+            self.jellyfin_api_key.setText(token)
+            self.config["jellyfin_device_id"] = device_id
+            self.jellyfin_password.clear()
+
     def test_jellyfin_connection(self):
         temporary_config = {
             **self.config,
             "jellyfin_url": self.jellyfin_url.text().strip().rstrip("/"),
+            "jellyfin_username": self.jellyfin_username.text().strip(),
             "jellyfin_api_key": self.jellyfin_api_key.text().strip(),
+            "jellyfin_device_id": self.config.get("jellyfin_device_id", ""),
             "update_manifest_url": self.update_manifest_url.text().strip(),
+            "github_repo": self.github_repo.text().strip(),
             "queue_finish_action": self.queue_finish_action.currentText(),
             "show_live_telemetry": self.show_live_telemetry.isChecked(),
             "analyze_media_on_scan": self.analyze_media.isChecked(),
@@ -2146,7 +3161,7 @@ class SettingsDialog(QDialog):
 
         ok, detail = test_jellyfin(temporary_config)
         self.jellyfin_test_result.setText(
-            ("✓ " if ok else "✕ ") + detail
+            (" " if ok else " ") + detail
         )
         self.jellyfin_test_result.setStyleSheet(
             "color:#78e286;font-weight:700;"
@@ -2215,13 +3230,22 @@ class SettingsDialog(QDialog):
             "encoder_preset": self.preset.currentText(),
             "jellyfin_url": self.jellyfin_url.text().strip().rstrip("/"),
             "jellyfin_api_key": self.jellyfin_api_key.text().strip(),
+            "update_manifest_url": self.update_manifest_url.text().strip(),
+            "github_repo": self.github_repo.text().strip(),
+            "queue_finish_action": self.queue_finish_action.currentText(),
+            "show_live_telemetry": self.show_live_telemetry.isChecked(),
+            "analyze_media_on_scan": self.analyze_media.isChecked(),
+            "theme": self.theme.currentText(),
+            "banner_theme": self.banner_theme.currentText(),
+            "ui_scale_percent": self.ui_scale.value(),
         }
+
 
 
 class HelpDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle(f"{APP_NAME} — Help")
+        self.setWindowTitle(f"{APP_NAME}  Help")
         self.resize(720, 560)
         layout = QVBoxLayout(self)
         browser = QTextBrowser()
@@ -2253,7 +3277,7 @@ class QueueManagerDialog(QDialog):
     ):
         super().__init__(parent)
         self.setWindowTitle(
-            f"{APP_NAME} — Queue Control Centre"
+            f"{APP_NAME}  Queue Control Centre"
         )
         self.resize(980, 690)
         self.movies = list(movies)
@@ -2311,27 +3335,27 @@ class QueueManagerDialog(QDialog):
 
         controls = QHBoxLayout()
 
-        top = QPushButton("⇈ TOP")
+        top = QPushButton(" TOP")
         top.clicked.connect(self.move_top)
         controls.addWidget(top)
 
-        up = QPushButton("↑ UP")
+        up = QPushButton(" UP")
         up.clicked.connect(
             lambda: self.move_selected(-1)
         )
         controls.addWidget(up)
 
-        down = QPushButton("↓ DOWN")
+        down = QPushButton(" DOWN")
         down.clicked.connect(
             lambda: self.move_selected(1)
         )
         controls.addWidget(down)
 
-        bottom = QPushButton("⇊ BOTTOM")
+        bottom = QPushButton(" BOTTOM")
         bottom.clicked.connect(self.move_bottom)
         controls.addWidget(bottom)
 
-        remove = QPushButton("✕ REMOVE")
+        remove = QPushButton(" REMOVE")
         remove.clicked.connect(self.remove_selected)
         controls.addWidget(remove)
 
@@ -2341,7 +3365,7 @@ class QueueManagerDialog(QDialog):
 
         controls.addStretch()
 
-        sort_title = QPushButton("SORT A–Z")
+        sort_title = QPushButton("SORT AZ")
         sort_title.clicked.connect(self.sort_title)
         controls.addWidget(sort_title)
 
@@ -2382,8 +3406,8 @@ class QueueManagerDialog(QDialog):
         for index, movie in enumerate(self.movies, 1):
             item = QListWidgetItem(
                 f"{index:02d}   {movie.title}\n"
-                f"       {human_size(movie.size)}  →  "
-                f"{movie.target_gib} GiB    "
+                f"       Score {movie.optimization_score}/100    "
+                f"Risk {movie.visual_risk}    "
                 f"save {human_size(movie.saving)}"
             )
             item.setData(
@@ -2515,10 +3539,10 @@ class QueueManagerDialog(QDialog):
 class HealthDialog(QDialog):
     def __init__(self, config: dict, parent=None):
         super().__init__(parent)
-        self.setWindowTitle(f"{APP_NAME} — System Health")
+        self.setWindowTitle(f"{APP_NAME}  System Health")
         self.resize(650, 500)
         layout = QVBoxLayout(self)
-        heading = QLabel("💀 EVIL'S SYSTEM STATUS")
+        heading = QLabel(" EVIL'S SYSTEM STATUS")
         heading.setStyleSheet("font-size:22px;font-weight:900;color:#d15cff;")
         layout.addWidget(heading)
 
@@ -2583,7 +3607,7 @@ class HealthDialog(QDialog):
         passed = 0
         for label, ok, detail in checks:
             passed += int(ok)
-            item = QListWidgetItem(f"{'🟢' if ok else '🔴'}  {label}\n      {detail}")
+            item = QListWidgetItem(f"{'' if ok else ''}  {label}\n      {detail}")
             item.setForeground(QColor("#78e286" if ok else "#ff6879"))
             self.results.addItem(item)
 
@@ -2609,19 +3633,137 @@ class StatCard(QFrame):
 
 
 class MainWindow(QMainWindow):
+    def setup_system_tray(self):
+        self.tray_icon = QSystemTrayIcon(
+            QIcon(str(APP_DIR / "assets" / "evils_skull.ico")),
+            self,
+        )
+        self.tray_icon.setToolTip(f"{APP_NAME} {APP_VERSION}")
+
+        menu = QMenu(self)
+        restore_action = QAction("Restore EMP", self)
+        restore_action.triggered.connect(self.restore_from_tray)
+        menu.addAction(restore_action)
+        menu.addSeparator()
+
+        exit_action = QAction("Exit EMP", self)
+        exit_action.triggered.connect(self.request_exit)
+        menu.addAction(exit_action)
+
+        self.tray_icon.setContextMenu(menu)
+        self.tray_icon.activated.connect(self.tray_activated)
+        if QSystemTrayIcon.isSystemTrayAvailable():
+            self.tray_icon.show()
+
+    def tray_activated(self, reason):
+        if reason in {
+            QSystemTrayIcon.ActivationReason.Trigger,
+            QSystemTrayIcon.ActivationReason.DoubleClick,
+        }:
+            self.restore_from_tray()
+
+    def restore_from_tray(self):
+        self.show()
+        self.setWindowState(
+            self.windowState() & ~Qt.WindowState.WindowMinimized
+        )
+        self.raise_()
+        self.activateWindow()
+
+    def minimize_to_tray(self):
+        if not hasattr(self, "tray_icon"):
+            return
+        if not self.tray_icon.isVisible():
+            self.tray_icon.show()
+        self.hide()
+        self.tray_icon.showMessage(
+            APP_NAME,
+            "EMP is still running. The current movie will continue safely.",
+            QSystemTrayIcon.MessageIcon.Information,
+            4000,
+        )
+
+    def request_exit(self):
+        self.close()
+
+    def request_exit_after_current(self):
+        if not self.queue_running or self.current_movie is None:
+            self.close()
+            return
+        self.exit_after_current = True
+        self.status.setText(
+            "Exit requested  the current movie will finish, then EMP will close."
+        )
+        self.operations.set_process_status("Exit requested after current movie")
+        if self.tray_icon.isVisible():
+            self.tray_icon.showMessage(
+                APP_NAME,
+                "Exit queued. EMP will close after the current movie finishes.",
+                QSystemTrayIcon.MessageIcon.Information,
+                5000,
+            )
+
+    def closeEvent(self, event: QCloseEvent):
+        if self.queue_running and self.current_movie is not None:
+            choice = QMessageBox(self)
+            choice.setIcon(QMessageBox.Icon.Warning)
+            choice.setWindowTitle("Movie processing is active")
+            choice.setText("EMP is currently processing a movie.")
+            choice.setInformativeText(
+                f'Do you want EMP to finish "{self.current_movie.title}" before closing?'
+            )
+
+            finish_exit = choice.addButton(
+                "Finish current movie, then exit",
+                QMessageBox.ButtonRole.AcceptRole,
+            )
+            keep_processing = choice.addButton(
+                "Keep processing",
+                QMessageBox.ButtonRole.RejectRole,
+            )
+            minimize = choice.addButton(
+                "Minimize to hidden icons",
+                QMessageBox.ButtonRole.ActionRole,
+            )
+            choice.exec()
+
+            if choice.clickedButton() is finish_exit:
+                self.request_exit_after_current()
+            elif choice.clickedButton() is minimize:
+                self.minimize_to_tray()
+
+            event.ignore()
+            return
+
+        if hasattr(self, "tray_icon"):
+            self.tray_icon.hide()
+        event.accept()
     def __init__(self):
         super().__init__()
         self.config = load_config()
         self.movies = []
         self.visible_movies = []
         self.queue = []
+        self.header_sort_column = None
+        self.header_sort_ascending = True
+        self.pending_queue = []
+        # Keep a strong Python reference to the active QRunnable.  Without this,
+        # a queued follow-up EncodeWorker can be garbage-collected before the
+        # QThreadPool gets a chance to start it on systems with a busy/single
+        # worker thread.
+        self.active_encode_worker = None
         self.pool = QThreadPool.globalInstance()
         self.current_movie = None
         self.current_started_at = 0.0
         self.pause_after_current = False
         self.queue_running = False
+        self.exit_after_current = False
+        self.queue_advance_timer = QTimer(self)
+        self.queue_advance_timer.setSingleShot(True)
+        self.queue_advance_timer.timeout.connect(self.process_next)
         self.setWindowTitle(f"{APP_NAME} {APP_VERSION}"); self.setWindowIcon(QIcon(str(APP_DIR/'assets'/'evils_skull.ico'))); self.resize(1660, 980); self.setMinimumSize(1320, 800)
         self.build_ui()
+        self.setup_system_tray()
         self.apply_style()
         self.operations_timer = QTimer(self)
         self.operations_timer.setInterval(30000)
@@ -2633,6 +3775,9 @@ class MainWindow(QMainWindow):
             500,
             self.operations.refresh_services,
         )
+        self.latest_release = None
+        self.update_checked_at = "Not checked yet"
+        QTimer.singleShot(1400, self.check_for_updates)
 
     def build_ui(self):
         central=QWidget(); page=QVBoxLayout(central); page.setContentsMargins(0,0,0,0); page.setSpacing(0)
@@ -2641,9 +3786,10 @@ class MainWindow(QMainWindow):
         header_layout.setContentsMargins(0,0,0,0)
         self.header=QLabel()
         self.header.setObjectName("header")
-        self.header.setPixmap(QPixmap(str(APP_DIR/'assets'/'header.png')))
-        self.header.setScaledContents(True)
+        self.header.setScaledContents(False)
+        self.header.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.header.setFixedHeight(190)
+        self.update_theme_banner()
         header_layout.addWidget(self.header)
 
         quick_bar = QFrame()
@@ -2657,14 +3803,15 @@ class MainWindow(QMainWindow):
         help_button.clicked.connect(self.show_help)
         quick_layout.addWidget(help_button)
 
-        settings_button = QPushButton("⚙  SETTINGS")
+        settings_button = QPushButton("  SETTINGS")
         settings_button.setObjectName("quickButton")
         settings_button.clicked.connect(self.show_settings)
         quick_layout.addWidget(settings_button)
 
-        self.update_button = QPushButton("↻  UPDATES")
+        self.update_button = QPushButton("  UPDATE STATUS")
         self.update_button.setObjectName("updateButton")
-        self.update_button.clicked.connect(self.show_update_center)
+        self.update_button.setToolTip("EMP update status")
+        self.update_button.clicked.connect(self.update_button_clicked)
         quick_layout.addWidget(self.update_button)
 
         header_layout.addWidget(quick_bar)
@@ -2688,7 +3835,11 @@ class MainWindow(QMainWindow):
             "All movies",
             "Queued only",
             "Not queued",
-            "High-value candidates",
+            "Excellent (90+)",
+            "Very Good (75+)",
+            "HDR movies",
+            "Modern codecs",
+            "No subtitles",
             "Possible duplicates",
             "Metadata failed",
         ]); self.filter_box.currentTextChanged.connect(self.apply_filter); toolbar.addWidget(self.filter_box)
@@ -2696,23 +3847,52 @@ class MainWindow(QMainWindow):
             "Size: High to low",
             "Size: Low to high",
             "Title: A to Z",
+            "Optimization score: High to low",
             "Saving: High to low",
             "Runtime: Longest first",
         ]); self.sort_box.currentTextChanged.connect(self.apply_filter); toolbar.addWidget(self.sort_box)
-        queue_manager_btn=QPushButton("☷ QUEUE MANAGER"); queue_manager_btn.clicked.connect(self.show_queue_manager); toolbar.addWidget(queue_manager_btn)
-        health_btn=QPushButton("♥ SYSTEM HEALTH"); health_btn.clicked.connect(self.show_health); toolbar.addWidget(health_btn)
-        duplicate_btn=QPushButton("≡ DUPLICATES"); duplicate_btn.clicked.connect(self.show_duplicates); toolbar.addWidget(duplicate_btn)
-        self.scan_btn=QPushButton("☠  SCAN"); self.scan_btn.setObjectName("primaryButton"); self.scan_btn.clicked.connect(self.scan); toolbar.addWidget(self.scan_btn); content_layout.addLayout(toolbar)
+        queue_manager_btn=QPushButton(" QUEUE MANAGER"); queue_manager_btn.clicked.connect(self.show_queue_manager); toolbar.addWidget(queue_manager_btn)
+        health_btn=QPushButton(" SYSTEM HEALTH"); health_btn.clicked.connect(self.show_health); toolbar.addWidget(health_btn)
+        duplicate_btn=QPushButton(" DUPLICATES"); duplicate_btn.clicked.connect(self.show_duplicates); toolbar.addWidget(duplicate_btn)
+        self.scan_btn=QPushButton("  SCAN"); self.scan_btn.setObjectName("primaryButton"); self.scan_btn.clicked.connect(self.scan); toolbar.addWidget(self.scan_btn); content_layout.addLayout(toolbar)
+
+        chips=QHBoxLayout()
+        chips.setSpacing(5)
+        chips.addWidget(QLabel("QUICK FILTERS:"))
+        for caption, mode in (
+            ("90+", "Excellent (90+)"),
+            ("75+", "Very Good (75+)"),
+            ("HDR", "HDR movies"),
+            ("MODERN", "Modern codecs"),
+            ("NO SUBS", "No subtitles"),
+            ("DUPLICATES", "Possible duplicates"),
+            ("CLEAR", "All movies"),
+        ):
+            chip=QPushButton(caption)
+            chip.setObjectName("filterChip")
+            chip.clicked.connect(
+                lambda _checked=False, value=mode:
+                self.set_quick_filter(value)
+            )
+            chips.addWidget(chip)
+        chips.addStretch()
+        content_layout.addLayout(chips)
         bulk_bar=QFrame(); bulk_bar.setObjectName("bulkBar"); bulk=QHBoxLayout(bulk_bar); bulk.setContentsMargins(10,7,10,7); bulk.setSpacing(7)
         bulk.addWidget(QLabel("BULK SELECTION:"))
-        select_all_btn=QPushButton("☑ SELECT ALL VISIBLE"); select_all_btn.clicked.connect(lambda:self.set_visible_checked(True)); bulk.addWidget(select_all_btn)
-        clear_btn=QPushButton("☐ CLEAR CHECKS"); clear_btn.clicked.connect(lambda:self.set_visible_checked(False)); bulk.addWidget(clear_btn)
+        select_all_btn=QPushButton(" SELECT ALL VISIBLE"); select_all_btn.clicked.connect(lambda:self.set_visible_checked(True)); bulk.addWidget(select_all_btn)
+        clear_btn=QPushButton(" CLEAR CHECKS"); clear_btn.clicked.connect(lambda:self.set_visible_checked(False)); bulk.addWidget(clear_btn)
         bulk.addSpacing(10); bulk.addWidget(QLabel("TARGET:"))
         self.bulk_target=QComboBox(); self.bulk_target.addItems(["3 GB","5 GB","10 GB","15 GB","20 GB"]); self.bulk_target.setCurrentText(f"{self.config['default_target_gib']} GB"); bulk.addWidget(self.bulk_target)
         apply_bulk_btn=QPushButton("APPLY SIZE TO CHECKED"); apply_bulk_btn.clicked.connect(self.apply_bulk_target); bulk.addWidget(apply_bulk_btn)
+        self.exclude_efficient_btn=QPushButton(" EXCLUDE ALREADY EFFICIENT")
+        self.exclude_efficient_btn.setCheckable(True)
+        self.exclude_efficient_btn.setChecked(True)
+        self.exclude_efficient_btn.setToolTip("When enabled, movies EMP rates as ALREADY EFFICIENT (score below 40) are hidden from the scanned list. Turn it off to show them again instantly. This starts enabled every time EMP opens.")
+        self.exclude_efficient_btn.toggled.connect(self.update_exclude_efficient_button)
+        bulk.addWidget(self.exclude_efficient_btn)
         bulk.addStretch()
-        add_checked_btn=QPushButton("▶ ADD CHECKED TO QUEUE"); add_checked_btn.setObjectName("startButton"); add_checked_btn.clicked.connect(self.add_checked_to_queue); bulk.addWidget(add_checked_btn)
-        remove_checked_btn=QPushButton("✕ REMOVE CHECKED"); remove_checked_btn.clicked.connect(self.remove_checked_from_queue); bulk.addWidget(remove_checked_btn)
+        add_checked_btn=QPushButton(" ADD CHECKED TO QUEUE"); add_checked_btn.setObjectName("startButton"); add_checked_btn.clicked.connect(self.add_checked_to_queue); bulk.addWidget(add_checked_btn)
+        remove_checked_btn=QPushButton(" REMOVE CHECKED"); remove_checked_btn.clicked.connect(self.remove_checked_from_queue); bulk.addWidget(remove_checked_btn)
         content_layout.addWidget(bulk_bar)
         splitter=QSplitter(Qt.Orientation.Horizontal)
         splitter.setChildrenCollapsible(False)
@@ -2726,25 +3906,28 @@ class MainWindow(QMainWindow):
         content_layout.addWidget(self.telemetry)
 
         bottom=QFrame(); bottom.setObjectName("bottomBar"); bottom_layout=QHBoxLayout(bottom); bottom_layout.setContentsMargins(14,8,14,8)
-        self.status=QLabel("Ready — scan your configured library to begin"); self.status.setObjectName("statusText"); bottom_layout.addWidget(self.status,1)
+        self.status=QLabel("Ready  scan your configured library to begin"); self.status.setObjectName("statusText"); bottom_layout.addWidget(self.status,1)
         self.progress=QProgressBar(); self.progress.setFixedWidth(320); self.progress.setValue(0); bottom_layout.addWidget(self.progress)
-        self.start_btn=QPushButton("▶  START PROCESS"); self.start_btn.setObjectName("startButton"); self.start_btn.clicked.connect(self.start_queue); bottom_layout.addWidget(self.start_btn); content_layout.addWidget(bottom)
+        self.start_btn=QPushButton("  START PROCESS"); self.start_btn.setObjectName("startButton"); self.start_btn.clicked.connect(self.start_queue); bottom_layout.addWidget(self.start_btn); content_layout.addWidget(bottom)
         body_layout.addWidget(content,1); page.addWidget(body,1); self.setCentralWidget(central)
 
     def make_sidebar(self):
         side=QFrame(); side.setObjectName("sidebar"); side.setFixedWidth(185); layout=QVBoxLayout(side); layout.setContentsMargins(8,12,8,12); layout.setSpacing(6)
-        items=[("⌂","DASHBOARD",self.show_dashboard),("▣","MOVIES",self.focus_movies),("☷","QUEUE",self.show_queue_manager),("◷","HISTORY",self.show_history),("▥","STATISTICS",self.show_statistics),("△","JELLYFIN",self.show_jellyfin_info),("⚙","SETTINGS",self.show_settings),("⚒","TOOLS",self.show_tools),("●","ABOUT",self.show_about)]
+        items=[("","DASHBOARD",self.show_dashboard),("","MOVIES",self.focus_movies),("","QUEUE",self.show_queue_manager),("","HISTORY",self.show_history),("","STATISTICS",self.show_statistics),("","JELLYFIN",self.show_jellyfin_info),("","SETTINGS",self.show_settings),("","TOOLS",self.show_tools),("","ABOUT",self.show_about)]
         for index,(icon,text,action) in enumerate(items):
             button=QPushButton(f"{icon}   {text}"); button.setObjectName("navActive" if index==0 else "navButton"); button.setCursor(Qt.CursorShape.PointingHandCursor)
             if action: button.clicked.connect(action)
             layout.addWidget(button)
-        layout.addStretch(); motto=QLabel("NO BITRATE\nLEFT BEHIND"); motto.setObjectName("motto"); motto.setAlignment(Qt.AlignmentFlag.AlignCenter); layout.addWidget(motto); return side
+        layout.addStretch(); return side
 
     def make_table_panel(self):
         panel=QFrame(); panel.setObjectName("panel"); layout=QVBoxLayout(panel); layout.setContentsMargins(0,0,0,0)
-        self.table=QTableWidget(0,8); self.table.setHorizontalHeaderLabels(["SELECT","MOVIE","VIDEO","RUNTIME","CURRENT SIZE","TARGET SIZE","SAVING","STATUS"]); self.table.verticalHeader().setVisible(False); self.table.setAlternatingRowColors(True); self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows); self.table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection); self.table.itemSelectionChanged.connect(self.update_inspector); self.table.itemChanged.connect(self.table_item_changed)
+        self.table=QTableWidget(0,11); self.table.setHorizontalHeaderLabels(["SELECT","MOVIE","SCORE","BADGES","RUNTIME","CURRENT SIZE","TARGET SIZE","SAVING","SAVING %","RISK","STATUS"]); self.table.verticalHeader().setVisible(False); self.table.setAlternatingRowColors(True); self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows); self.table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection); self.table.itemSelectionChanged.connect(self.update_inspector); self.table.itemChanged.connect(self.table_item_changed)
         header=self.table.horizontalHeader(); header.setSectionResizeMode(0,QHeaderView.ResizeMode.ResizeToContents); header.setSectionResizeMode(1,QHeaderView.ResizeMode.Stretch)
-        for column in range(2,8): header.setSectionResizeMode(column,QHeaderView.ResizeMode.ResizeToContents)
+        for column in range(2,11): header.setSectionResizeMode(column,QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionsClickable(True)
+        header.setSortIndicatorShown(True)
+        header.sectionClicked.connect(self.table_header_clicked)
         layout.addWidget(self.table); return panel
 
     def make_inspector(self):
@@ -2785,7 +3968,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(poster_frame)
 
         poster_buttons = QHBoxLayout()
-        refresh_poster = QPushButton("↻ REFRESH POSTER")
+        refresh_poster = QPushButton(" REFRESH POSTER")
         refresh_poster.clicked.connect(self.refresh_selected_poster)
         poster_buttons.addWidget(refresh_poster)
         clear_cache = QPushButton("CLEAR POSTER CACHE")
@@ -2811,6 +3994,24 @@ class MainWindow(QMainWindow):
         )
         layout.addWidget(self.media_summary)
 
+        self.badge_summary = QLabel("BADGES PENDING")
+        self.badge_summary.setObjectName("badgeSummary")
+        self.badge_summary.setWordWrap(True)
+        self.badge_summary.setAlignment(
+            Qt.AlignmentFlag.AlignCenter
+        )
+        layout.addWidget(self.badge_summary)
+
+        self.reason_summary = QLabel(
+            "RECOMMENDATION REASONS PENDING"
+        )
+        self.reason_summary.setObjectName("reasonSummary")
+        self.reason_summary.setWordWrap(True)
+        self.reason_summary.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        layout.addWidget(self.reason_summary)
+
         self.duplicate_warning = QLabel("")
         self.duplicate_warning.setObjectName(
             "duplicateWarning"
@@ -2824,13 +4025,13 @@ class MainWindow(QMainWindow):
         divider.setObjectName("divider")
         layout.addWidget(divider)
 
-        self.size_summary = QLabel("CURRENT — → TARGET —")
+        self.size_summary = QLabel("CURRENT   TARGET ")
         self.size_summary.setObjectName("sizeSummary")
         self.size_summary.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.size_summary.setWordWrap(True)
         layout.addWidget(self.size_summary)
 
-        self.saving_summary = QLabel("SAVING —")
+        self.saving_summary = QLabel("SAVING ")
         self.saving_summary.setObjectName("savingSummary")
         self.saving_summary.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.saving_summary.setWordWrap(True)
@@ -2873,7 +4074,7 @@ class MainWindow(QMainWindow):
         layout.addLayout(custom_row)
 
         self.queue_selected_btn = QPushButton(
-            "▶ ADD / REMOVE FROM QUEUE"
+            " ADD / REMOVE FROM QUEUE"
         )
         self.queue_selected_btn.setObjectName("startButton")
         self.queue_selected_btn.clicked.connect(
@@ -2885,8 +4086,49 @@ class MainWindow(QMainWindow):
         scroll.setWidget(self.inspector)
         return scroll
 
+    def update_theme_banner(self):
+        """Apply the user-selected EMP banner artwork.
+
+        Banner choice is intentionally independent from the colour palette so
+        future banner packs can be added without redesigning the theme engine.
+        """
+        banner_name = self.config.get("banner_theme", "Original Purple")
+        banner_files = {
+            "Original Purple": "header.png",
+            "Red Ember": "red_ember_banner.png",
+        }
+        banner_path = APP_DIR / "assets" / banner_files.get(banner_name, "header.png")
+        if not banner_path.exists():
+            banner_path = APP_DIR / "assets" / "header.png"
+        pixmap = QPixmap(str(banner_path))
+        if pixmap.isNull():
+            return
+        # Preserve the artwork's aspect ratio. Scale to cover the banner area,
+        # then let the QLabel clip the excess from the centre instead of
+        # stretching skulls/text to whatever shape the window happens to be.
+        target = self.header.size()
+        if target.width() > 0 and target.height() > 0:
+            pixmap = pixmap.scaled(
+                target,
+                Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+        self.header.setPixmap(pixmap)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, "header"):
+            self.update_theme_banner()
+
     def apply_style(self):
-        self.setStyleSheet("""
+        if hasattr(self, "header"):
+            self.update_theme_banner()
+        palette = THEME_PALETTES.get(
+            self.config.get("theme", "Skull Purple"),
+            THEME_PALETTES["Skull Purple"],
+        )
+
+        qss = r"""
         QMainWindow,QWidget{background:#08080c;color:#f3edf7;font-family:'Segoe UI';} QLabel#header{background:#08080c;border-bottom:2px solid #61217f;}
         QPushButton#headerIcon{background:rgba(20,10,28,210);border:1px solid #a943d0;border-radius:20px;color:#e582ff;font-size:21px;font-weight:900;padding:0;} QPushButton#headerIcon:hover{background:#6e218c;color:white;}
         QFrame#sidebar{background:#0c0b10;border:1px solid #29202f;border-radius:8px;} QPushButton#navButton,QPushButton#navActive{text-align:left;border:none;border-radius:6px;padding:11px 12px;font-size:13px;font-weight:700;color:#d9d2dd;background:transparent;} QPushButton#navButton:hover{background:#211627;color:white;} QPushButton#navActive{background:#46205a;color:white;border-left:3px solid #d554ff;} QLabel#motto{color:#bd43ec;font-size:18px;font-weight:900;font-style:italic;padding:18px 4px;}
@@ -2896,7 +4138,7 @@ class MainWindow(QMainWindow):
         QFrame#bulkBar{background:#0d0c11;border:1px solid #35243e;border-radius:7px;} QFrame#bulkBar QLabel{color:#b8aebd;font-size:10px;font-weight:800;}
         QCheckBox::indicator,QTableWidget::indicator{width:18px;height:18px;} QTableWidget::indicator:unchecked{border:1px solid #765184;background:#151119;border-radius:3px;} QTableWidget::indicator:checked{border:1px solid #d25cff;background:#8d2bb2;border-radius:3px;}
         QScrollArea#inspectorScroll{background:#0d0c11;border:1px solid #2d2333;border-radius:8px;} QScrollArea#inspectorScroll QWidget{background:#0d0c11;} QFrame#panel,QFrame#inspector{background:#0d0c11;border:1px solid #2d2333;border-radius:8px;} QTableWidget{background:#0d0c11;alternate-background-color:#131117;border:none;gridline-color:#24202a;selection-background-color:#32153f;} QHeaderView::section{background:#111016;color:#bdb4c2;border:none;border-bottom:1px solid #33253c;padding:9px;font-size:10px;font-weight:800;} QTableWidget::item{padding:8px;}
-        QLabel#detailTitle{color:#cf55f6;font-size:18px;font-weight:900;font-style:italic;} QFrame#posterPlaceholder{background:#151119;border:1px solid #493254;border-radius:7px;min-height:250px;} QLabel#posterImage{color:#8f8296;font-size:18px;font-weight:900;background:transparent;} QLabel#detailPath{color:#958b9b;font-size:11px;} QLabel#mediaSummary{background:#121017;border:1px solid #312438;border-radius:7px;padding:9px;color:#cfc5d4;font-size:10px;} QLabel#duplicateWarning{background:#2b1d0d;border:1px solid #b17825;border-radius:7px;padding:9px;color:#ffcf78;font-size:10px;font-weight:800;} QFrame#divider{color:#382b40;} QLabel#sizeSummary{font-size:14px;font-weight:800;color:#eee8f1;} QLabel#savingSummary{color:#70df7b;font-size:13px;font-weight:800;} QLabel#recommendation{background:#17101c;border:1px solid #4d2c5b;border-radius:7px;padding:8px;color:#dfb5f4;font-size:11px;font-weight:800;} QLabel#smallHeading{color:#aea3b3;font-size:10px;font-weight:800;}
+        QLabel#detailTitle{color:#cf55f6;font-size:18px;font-weight:900;font-style:italic;} QFrame#posterPlaceholder{background:#151119;border:1px solid #493254;border-radius:7px;min-height:250px;} QLabel#posterImage{color:#8f8296;font-size:18px;font-weight:900;background:transparent;} QLabel#detailPath{color:#958b9b;font-size:11px;} QLabel#mediaSummary{background:#121017;border:1px solid #312438;border-radius:7px;padding:9px;color:#cfc5d4;font-size:10px;} QLabel#badgeSummary{background:#15101c;border:1px solid #5b3270;border-radius:7px;padding:8px;color:#70cfff;font-size:10px;font-weight:900;} QLabel#reasonSummary{background:#101014;border:1px solid #39303e;border-radius:7px;padding:9px;color:#d8cedd;font-size:10px;} QPushButton#filterChip{background:#16111b;border:1px solid #4b3354;border-radius:10px;padding:4px 9px;color:#cfc4d4;font-size:9px;font-weight:800;} QPushButton#filterChip:hover{background:#3b1b48;border-color:#c956ff;color:white;} QLabel#duplicateWarning{background:#2b1d0d;border:1px solid #b17825;border-radius:7px;padding:9px;color:#ffcf78;font-size:10px;font-weight:800;} QFrame#divider{color:#382b40;} QLabel#sizeSummary{font-size:14px;font-weight:800;color:#eee8f1;} QLabel#savingSummary{color:#70df7b;font-size:13px;font-weight:800;} QLabel#recommendation{background:#17101c;border:1px solid #4d2c5b;border-radius:7px;padding:8px;color:#dfb5f4;font-size:11px;font-weight:800;} QLabel#smallHeading{color:#aea3b3;font-size:10px;font-weight:800;}
         QFrame#operationsCenter{background:#0b0910;border:1px solid #4b2858;border-radius:9px;}
         QFrame#trafficStatus{background:#121017;border:1px solid #302437;border-radius:10px;}
         QFrame#queueSummary{background:#0f0c14;border:1px solid #4b2858;border-radius:8px;}
@@ -2918,7 +4160,82 @@ class MainWindow(QMainWindow):
         QPushButton#quickButton,QPushButton#updateButton{background:#15111a;border:1px solid #493453;border-radius:6px;padding:6px 10px;color:#ded5e3;font-size:10px;font-weight:800;}
         QPushButton#quickButton:hover,QPushButton#updateButton:hover{background:#32183d;border-color:#a943d0;color:white;}
         QFrame#bottomBar{background:#0d0c11;border:1px solid #2c2133;border-radius:8px;} QLabel#statusText{color:#c9becf;} QProgressBar{background:#17121b;border:1px solid #3d2946;border-radius:6px;text-align:center;color:white;} QProgressBar::chunk{background:#9f36c8;border-radius:5px;} QSplitter::handle{background:#1e1723;width:5px;}
-        """)
+        """
+
+        replacements = {
+            "#08080c": palette["bg"],
+            "#0d0c11": palette["surface"],
+            "#121017": palette["surface2"],
+            "#111016": palette["surface2"],
+            "#0c0b10": palette["surface"],
+            "#0b0910": palette["surface"],
+            "#09070d": palette["bg"],
+            "#101015": palette["surface2"],
+            "#151119": palette["surface2"],
+            "#17121b": palette["surface2"],
+            "#18141c": palette["surface2"],
+            "#29202f": palette["border"],
+            "#2d2333": palette["border"],
+            "#302437": palette["border"],
+            "#312438": palette["border"],
+            "#35243e": palette["border"],
+            "#35253e": palette["border"],
+            "#34283c": palette["border"],
+            "#493453": palette["border"],
+            "#4b2858": palette["border"],
+            "#4b3354": palette["border"],
+            "#61217f": palette["accent_dark"],
+            "#9d3cc2": palette["accent"],
+            "#a743ce": palette["accent"],
+            "#a943d0": palette["accent"],
+            "#bf4bea": palette["accent"],
+            "#cf55f6": palette["accent"],
+            "#d25cff": palette["accent"],
+            "#d35cff": palette["accent"],
+            "#d554ff": palette["accent"],
+            "#e582ff": palette["accent"],
+            "#4f1768": palette["accent_dark"],
+            "#46205a": palette["accent_dark"],
+            "#351342": palette["accent_dark"],
+            "#70218f": palette["accent_hover"],
+            "#6e218c": palette["accent_hover"],
+            "#32183d": palette["accent_hover"],
+            "#2d1937": palette["accent_hover"],
+            "#f3edf7": palette["text"],
+            "#eee8f1": palette["text"],
+            "#e9e1ed": palette["text"],
+            "#ddd5e2": palette["text"],
+            "#d9d2dd": palette["text"],
+            "#d8cedd": palette["text"],
+            "#cfc5d4": palette["text"],
+            "#c9becf": palette["text"],
+            "#a9a0ae": palette["muted"],
+            "#a99daf": palette["muted"],
+            "#aea3b3": palette["muted"],
+            "#958b9b": palette["muted"],
+            "#93889a": palette["muted"],
+            "#70df7b": palette["success"],
+            "#ffbd59": palette["warning"],
+            "#ff6879": palette["danger"],
+            "#5db7ff": palette["blue"],
+            "#70cfff": palette["blue"],
+            "#9f36c8": palette["accent"],
+            "#8d2bb2": palette["accent_dark"],
+        }
+
+        for original, replacement in replacements.items():
+            qss = qss.replace(original, replacement)
+
+        ui_scale = int(self.config.get("ui_scale_percent", 100))
+        qss = scale_qss_font_sizes(qss, ui_scale)
+
+        app = QApplication.instance()
+        if app is not None:
+            font = QFont("Segoe UI")
+            font.setPointSizeF(9.0 * max(0.85, min(1.50, ui_scale / 100.0)))
+            app.setFont(font)
+
+        self.setStyleSheet(qss)
 
     def scan(self):
         self.scan_btn.setEnabled(False); root=Path(self.config["movie_root"]); self.status.setText(f"Scanning {root}..."); self.progress.setRange(0,0)
@@ -3071,6 +4388,71 @@ class MainWindow(QMainWindow):
             f"{message}"
         )
 
+    def set_quick_filter(self, mode: str):
+        index = self.filter_box.findText(mode)
+        if index >= 0:
+            self.filter_box.setCurrentIndex(index)
+        else:
+            self.apply_filter()
+
+    def sort_box_changed(self, _text: str):
+        self.header_sort_column = None
+        if hasattr(self, "table"):
+            self.table.horizontalHeader().setSortIndicatorShown(False)
+        self.apply_filter()
+
+    def table_header_clicked(self, column: int):
+        # SELECT is a checkbox column, not a useful sortable data field.
+        if column == 0:
+            return
+        if self.header_sort_column == column:
+            self.header_sort_ascending = not self.header_sort_ascending
+        else:
+            self.header_sort_column = column
+            # Text starts A-Z; numeric values start biggest-first.
+            self.header_sort_ascending = column in {1, 3, 9, 10}
+        header = self.table.horizontalHeader()
+        header.setSortIndicatorShown(True)
+        header.setSortIndicator(
+            column,
+            Qt.SortOrder.AscendingOrder
+            if self.header_sort_ascending
+            else Qt.SortOrder.DescendingOrder,
+        )
+        self.apply_filter()
+
+    def movie_status_sort_text(self, movie: Movie) -> str:
+        if movie.duplicate_count > 1:
+            return f"possible duplicate {movie.duplicate_count:06d}"
+        if movie.status != "Ready":
+            return movie.status.casefold()
+        if movie.queued:
+            return "queued"
+        return movie.optimization_rating.casefold()
+
+    def header_sort_value(self, movie: Movie, column: int):
+        if column == 1:
+            return movie.title.casefold()
+        if column == 2:
+            return movie.optimization_score
+        if column == 3:
+            return movie.badges_text.casefold()
+        if column == 4:
+            return movie.duration_seconds
+        if column == 5:
+            return movie.size
+        if column == 6:
+            return movie.target_gib
+        if column == 7:
+            return movie.saving
+        if column == 8:
+            return movie.saving_percent
+        if column == 9:
+            return {"LOW": 0, "MEDIUM": 1, "HIGH": 2}.get(movie.visual_risk.upper(), 99)
+        if column == 10:
+            return self.movie_status_sort_text(movie)
+        return movie.title.casefold()
+
     def apply_filter(self):
         search = self.search.text().strip().lower()
         mode = self.filter_box.currentText()
@@ -3080,7 +4462,20 @@ class MainWindow(QMainWindow):
             for movie in self.movies
             if search in movie.title.lower()
             or search in movie.video_text.lower()
+            or search in movie.badges_text.lower()
         ]
+
+        # Live library filter: hide titles EMP already considers efficient while
+        # the exclusion toggle is enabled. The movies remain in self.movies so
+        # switching the toggle off restores them instantly without a rescan.
+        if (
+            hasattr(self, "exclude_efficient_btn")
+            and self.exclude_efficient_btn.isChecked()
+        ):
+            items = [
+                movie for movie in items
+                if not self.is_already_efficient(movie)
+            ]
 
         if mode == "Queued only":
             items = [
@@ -3094,12 +4489,32 @@ class MainWindow(QMainWindow):
                 for movie in items
                 if not movie.queued
             ]
-        elif mode == "High-value candidates":
+        elif mode == "Excellent (90+)":
             items = [
-                movie
-                for movie in items
-                if movie.recommendation[0]
-                in {"HIGH VALUE", "GOOD CANDIDATE"}
+                movie for movie in items
+                if movie.optimization_score >= 90
+            ]
+        elif mode == "Very Good (75+)":
+            items = [
+                movie for movie in items
+                if movie.optimization_score >= 75
+            ]
+        elif mode == "HDR movies":
+            items = [
+                movie for movie in items
+                if movie.hdr_badge not in {"SDR", "UNKNOWN"}
+            ]
+        elif mode == "Modern codecs":
+            items = [
+                movie for movie in items
+                if movie.video_codec.casefold()
+                in {"hevc", "h265", "av1", "vp9"}
+            ]
+        elif mode == "No subtitles":
+            items = [
+                movie for movie in items
+                if movie.metadata_status == "Ready"
+                and movie.subtitle_count == 0
             ]
         elif mode == "Possible duplicates":
             items = [
@@ -3114,19 +4529,34 @@ class MainWindow(QMainWindow):
                 if movie.metadata_status == "Failed"
             ]
 
-        sort = self.sort_box.currentText()
-        if sort == "Size: Low to high":
-            items.sort(key=lambda movie: movie.size)
-        elif sort == "Title: A to Z":
-            items.sort(key=lambda movie: movie.title.lower())
-        elif sort == "Saving: High to low":
-            items.sort(key=lambda movie: -movie.saving)
-        elif sort == "Runtime: Longest first":
+        if self.header_sort_column is not None:
             items.sort(
-                key=lambda movie: -movie.duration_seconds
+                key=lambda movie: self.header_sort_value(
+                    movie, self.header_sort_column
+                ),
+                reverse=not self.header_sort_ascending,
             )
         else:
-            items.sort(key=lambda movie: -movie.size)
+            sort = self.sort_box.currentText()
+            if sort == "Size: Low to high":
+                items.sort(key=lambda movie: movie.size)
+            elif sort == "Title: A to Z":
+                items.sort(key=lambda movie: movie.title.lower())
+            elif sort == "Optimization score: High to low":
+                items.sort(
+                    key=lambda movie: (
+                        -movie.optimization_score,
+                        -movie.saving,
+                    )
+                )
+            elif sort == "Saving: High to low":
+                items.sort(key=lambda movie: -movie.saving)
+            elif sort == "Runtime: Longest first":
+                items.sort(
+                    key=lambda movie: -movie.duration_seconds
+                )
+            else:
+                items.sort(key=lambda movie: -movie.size)
 
         self.visible_movies = items
         self.populate_table()
@@ -3185,7 +4615,7 @@ class MainWindow(QMainWindow):
             key=lambda value: value[0].title.lower(),
         ):
             header = QListWidgetItem(
-                f"⚠ {group[0].title} — {len(group)} files"
+                f" {group[0].title}  {len(group)} files"
             )
             header.setForeground(QColor("#ffbd59"))
             listing.addItem(header)
@@ -3194,8 +4624,8 @@ class MainWindow(QMainWindow):
                 key=lambda value: -value.size,
             ):
                 item = QListWidgetItem(
-                    f"    {human_size(movie.size)}  •  "
-                    f"{movie.video_text}  •  {movie.path}"
+                    f"    {human_size(movie.size)}    "
+                    f"{movie.video_text}    {movie.path}"
                 )
                 item.setForeground(QColor("#cfc5d4"))
                 listing.addItem(item)
@@ -3212,6 +4642,14 @@ class MainWindow(QMainWindow):
         self.table.blockSignals(True)
         self.table.setRowCount(len(self.visible_movies))
 
+        score_colors = {
+            5: "#70df7b",
+            4: "#a8e66f",
+            3: "#ffbd59",
+            2: "#ff8f59",
+            1: "#a59aa9",
+        }
+
         for row, movie in enumerate(self.visible_movies):
             check = QTableWidgetItem()
             check.setFlags(
@@ -3224,21 +4662,13 @@ class MainWindow(QMainWindow):
                 if movie.selected
                 else Qt.CheckState.Unchecked
             )
-            check.setData(
-                Qt.ItemDataRole.UserRole,
-                movie,
-            )
-            check.setTextAlignment(
-                Qt.AlignmentFlag.AlignCenter
-            )
+            check.setData(Qt.ItemDataRole.UserRole, movie)
+            check.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             self.table.setItem(row, 0, check)
 
             title = QTableWidgetItem(movie.title)
             title.setToolTip(str(movie.path))
-            title.setData(
-                Qt.ItemDataRole.UserRole,
-                movie,
-            )
+            title.setData(Qt.ItemDataRole.UserRole, movie)
             title.setForeground(
                 QColor(
                     "#ffbd59"
@@ -3250,22 +4680,40 @@ class MainWindow(QMainWindow):
             )
             self.table.setItem(row, 1, title)
 
-            video_item = QTableWidgetItem(
-                movie.video_text
+            score_item = QTableWidgetItem(
+                f"{movie.optimization_score}/100"
+            )
+            score_item.setForeground(QColor(movie.score_colour))
+            score_item.setToolTip(
+                movie.optimization_rating
+                + "\n\n"
+                + "\n".join(
+                    f"{name}: {value:+d}"
+                    for name, value
+                    in movie.optimization_breakdown.items()
+                )
+            )
+            self.table.setItem(row, 2, score_item)
+
+            badges = QTableWidgetItem(
+                movie.badges_text
                 if movie.metadata_status == "Ready"
                 else movie.metadata_status
             )
-            video_item.setForeground(QColor("#5db7ff"))
-            self.table.setItem(row, 2, video_item)
+            badges.setForeground(QColor("#5db7ff"))
+            badges.setToolTip(
+                movie.video_text + "\n" + movie.audio_text
+            )
+            self.table.setItem(row, 3, badges)
 
             self.table.setItem(
                 row,
-                3,
+                4,
                 QTableWidgetItem(movie.runtime_text),
             )
             self.table.setItem(
                 row,
-                4,
+                5,
                 QTableWidgetItem(human_size(movie.size)),
             )
 
@@ -3277,25 +4725,35 @@ class MainWindow(QMainWindow):
             target.addItems(
                 [f"{value} GB" for value in choices]
             )
-            target.setCurrentText(
-                f"{movie.target_gib} GB"
-            )
+            target.setCurrentText(f"{movie.target_gib} GB")
             target.currentTextChanged.connect(
                 lambda value, m=movie, r=row:
                 self.change_target(m, r, value)
             )
-            self.table.setCellWidget(row, 5, target)
+            self.table.setCellWidget(row, 6, target)
 
             saving = QTableWidgetItem(
                 human_size(movie.saving)
             )
             saving.setForeground(QColor("#70df7b"))
-            self.table.setItem(row, 6, saving)
+            self.table.setItem(row, 7, saving)
+
+            percent = QTableWidgetItem(
+                f"{movie.saving_percent}%"
+            )
+            percent.setForeground(
+                QColor(
+                    "#70df7b"
+                    if movie.saving_percent >= 60
+                    else "#ffbd59"
+                )
+            )
+            self.table.setItem(row, 8, percent)
 
             label, _detail = movie.recommendation
             if movie.duplicate_count > 1:
                 status_text = (
-                    f"Possible duplicate ×{movie.duplicate_count}"
+                    f"Possible duplicate {movie.duplicate_count}"
                 )
                 status_color = "#ffbd59"
             elif movie.status != "Ready":
@@ -3306,20 +4764,23 @@ class MainWindow(QMainWindow):
                 status_color = "#d45aff"
             else:
                 status_text = label
-                status_color = (
-                    "#70df7b"
-                    if label in {
-                        "HIGH VALUE",
-                        "GOOD CANDIDATE",
-                    }
-                    else "#ffbd59"
-                    if label in {"REVIEW", "MODERATE"}
-                    else "#b4a9ba"
-                )
+                status_color = movie.score_colour
 
             status = QTableWidgetItem(status_text)
             status.setForeground(QColor(status_color))
-            self.table.setItem(row, 7, status)
+            status.setToolTip(
+                "\n".join(movie.recommendation_reasons)
+            )
+            risk = QTableWidgetItem(movie.visual_risk)
+            risk.setForeground(
+                QColor(
+                    "#ffbd59"
+                    if movie.visual_risk == "MEDIUM"
+                    else "#70df7b"
+                )
+            )
+            self.table.setItem(row, 9, risk)
+            self.table.setItem(row, 10, status)
 
         self.table.blockSignals(False)
         if self.table.rowCount():
@@ -3337,34 +4798,119 @@ class MainWindow(QMainWindow):
     def checked_movies(self):
         return [movie for movie in self.movies if movie.selected]
 
+    def is_already_efficient(self, movie):
+        return movie.optimization_score < 40
+
     def set_visible_checked(self,checked):
+        skipped = 0
+        exclude_efficient = (
+            checked
+            and hasattr(self, "exclude_efficient_btn")
+            and self.exclude_efficient_btn.isChecked()
+        )
         for movie in self.visible_movies:
-            movie.selected=checked
+            if exclude_efficient and self.is_already_efficient(movie):
+                movie.selected = False
+                skipped += 1
+            else:
+                movie.selected=checked
         self.populate_table()
         count=len([movie for movie in self.visible_movies if movie.selected])
-        self.status.setText(f"{count} visible movie(s) checked.")
+        message = f"{count} visible movie(s) checked."
+        if skipped:
+            message += f" Excluded {skipped} already-efficient movie(s)."
+        self.status.setText(message)
+
+    def update_exclude_efficient_button(self, enabled: bool):
+        self.exclude_efficient_btn.setText(
+            " EXCLUDE ALREADY EFFICIENT"
+            if enabled
+            else " INCLUDE ALREADY EFFICIENT"
+        )
+        deselected = 0
+        if enabled:
+            # Hidden titles must not remain silently checked and later be
+            # actioned by a bulk/queue command while they are invisible.
+            for movie in self.movies:
+                if movie.selected and self.is_already_efficient(movie):
+                    movie.selected = False
+                    deselected += 1
+
+        # Rebuild visible_movies from the full scan. This makes the toggle a
+        # true live filter: ON hides efficient movies, OFF restores them.
+        self.apply_filter()
+        self.update_stats()
+        hidden = sum(1 for movie in self.movies if self.is_already_efficient(movie))
+        if enabled:
+            message = f"Hidden {hidden} already-efficient movie(s) from the scanned list."
+            if deselected:
+                message += f" Unchecked {deselected} hidden movie(s)."
+        else:
+            message = f"Showing all scanned movies, including {hidden} already-efficient movie(s)."
+        self.status.setText(message)
 
     def apply_bulk_target(self):
         checked=self.checked_movies()
         if not checked:
             QMessageBox.information(self,APP_NAME,"Tick the boxes beside the movies first.")
             return
+        eligible = checked
+        skipped = []
+        if self.exclude_efficient_btn.isChecked():
+            eligible = [
+                movie for movie in checked
+                if not self.is_already_efficient(movie)
+            ]
+            skipped = [
+                movie for movie in checked
+                if self.is_already_efficient(movie)
+            ]
+        if not eligible:
+            self.status.setText(
+                f"No target sizes changed  {len(skipped)} checked movie(s) are already efficient and were excluded."
+            )
+            return
         size=int(self.bulk_target.currentText().split()[0])
-        for movie in checked:
+        for movie in eligible:
             movie.target_gib=size
         self.populate_table(); self.update_stats()
-        self.status.setText(f"Applied a {size} GiB target to {len(checked)} checked movie(s).")
+        message = f"Applied a {size} GiB target to {len(eligible)} checked movie(s)."
+        if skipped:
+            message += f" Skipped {len(skipped)} already-efficient movie(s)."
+        self.status.setText(message)
 
     def add_checked_to_queue(self):
         checked=self.checked_movies()
         if not checked:
             QMessageBox.information(self,APP_NAME,"Tick the boxes beside the movies first.")
             return
-        for movie in checked:
+        eligible = checked
+        skipped = []
+        if self.exclude_efficient_btn.isChecked():
+            eligible = [
+                movie for movie in checked
+                if not self.is_already_efficient(movie)
+            ]
+            skipped = [
+                movie for movie in checked
+                if self.is_already_efficient(movie)
+            ]
+        for movie in skipped:
+            movie.selected = False
+        if not eligible:
+            self.apply_filter(); self.update_stats()
+            self.status.setText(
+                f"Nothing added  excluded {len(skipped)} already-efficient movie(s)."
+            )
+            return
+        for movie in eligible:
             movie.queued=True
             movie.selected=False
         self.apply_filter(); self.update_stats()
-        self.status.setText(f"Added {len(checked)} movie(s) to the queue.")
+        message = f"Added {len(eligible)} movie(s) to the queue."
+        if skipped:
+            message += f" Excluded {len(skipped)} already-efficient movie(s)."
+        self.status.setText(message)
 
     def remove_checked_from_queue(self):
         checked=self.checked_movies()
@@ -3455,27 +5001,15 @@ class MainWindow(QMainWindow):
         if not movie:return
         self.detail_title.setText(movie.title.upper())
         self.detail_path.setText(str(movie.path))
-        self.size_summary.setText(f"CURRENT {human_size(movie.size)} → TARGET {movie.target_gib} GB")
+        self.size_summary.setText(f"CURRENT {human_size(movie.size)}  TARGET {movie.target_gib} GB")
         self.saving_summary.setText(f"SAVING {human_size(movie.saving)} ({movie.saving_percent}%)")
         label, reason = movie.recommendation
-        stars = {
-            "HIGH VALUE": "★★★★★",
-            "GOOD CANDIDATE": "★★★★☆",
-            "REVIEW": "★★★☆☆",
-            "MODERATE": "★★★☆☆",
-            "ALREADY EFFICIENT": "★★☆☆☆",
-            "LOW VALUE": "★☆☆☆☆",
-            "SKIP": "☆☆☆☆☆",
-        }.get(label, "★★★☆☆")
         self.recommendation.setText(
-            f"{stars}  {label}\n{reason}"
+            f"{movie.optimization_score}/100  {label}\n"
+            f"{movie.health_stars}    VISUAL RISK: {movie.visual_risk}"
         )
 
-        bitrate_mbps = (
-            movie.overall_bitrate / 1_000_000
-            if movie.overall_bitrate
-            else 0
-        )
+        bitrate_mbps = movie.bitrate_mbps
         metadata_lines = [
             f"VIDEO: {movie.video_text}",
             f"PROFILE: {movie.video_profile or 'Unknown'}",
@@ -3494,9 +5028,29 @@ class MainWindow(QMainWindow):
             else f"MEDIA ANALYSIS: {movie.metadata_status}"
         )
 
+        self.badge_summary.setText(
+            movie.badges_text
+            if movie.metadata_status == "Ready"
+            else "BADGES UNAVAILABLE"
+        )
+        breakdown_lines = [
+            f"{name}: {value:+d}"
+            for name, value
+            in movie.optimization_breakdown.items()
+        ]
+        self.reason_summary.setText(
+            "OPTIMIZATION SCORE BREAKDOWN\n\n"
+            + "\n".join(breakdown_lines)
+            + "\n\nWHY EMO SCORED IT THIS WAY\n"
+            + "\n".join(
+                f" {item}"
+                for item in movie.recommendation_reasons
+            )
+        )
+
         if movie.duplicate_count > 1:
             self.duplicate_warning.setText(
-                f"⚠ POSSIBLE DUPLICATE: "
+                f" POSSIBLE DUPLICATE: "
                 f"{movie.duplicate_count} matching titles were found. "
                 "Use the Duplicates button to review them. "
                 "Nothing will be deleted automatically."
@@ -3504,7 +5058,7 @@ class MainWindow(QMainWindow):
             self.duplicate_warning.setVisible(True)
         else:
             self.duplicate_warning.setVisible(False)
-        self.queue_selected_btn.setText("✕ REMOVE FROM QUEUE" if movie.queued else "▶ ADD TO QUEUE")
+        self.queue_selected_btn.setText(" REMOVE FROM QUEUE" if movie.queued else " ADD TO QUEUE")
         local_poster = movie.poster_path()
         poster_detail = ""
         if local_poster:
@@ -3536,7 +5090,11 @@ class MainWindow(QMainWindow):
             self.poster.setText("NO\nPOSTER")
         if poster_detail:
             self.status.setText(poster_detail)
-    def change_target(self,movie,row,value): movie.target_gib=int(value.split()[0]); self.table.setItem(row,6,QTableWidgetItem(human_size(movie.saving))); self.update_inspector(); self.update_stats()
+    def change_target(self,movie,row,value):
+        movie.target_gib=int(value.split()[0])
+        self.apply_filter()
+        self.update_stats()
+        self.update_inspector()
     def set_selected_target(self,size):
         movie=self.selected_movie()
         if not movie:return
@@ -3579,13 +5137,20 @@ class MainWindow(QMainWindow):
         if answer != QMessageBox.StandardButton.Yes:
             return
 
+        # Snapshot the queue for this run.  Do not rebuild the active run from
+        # checkbox flags after each movie; UI refreshes can legitimately change
+        # those flags and previously caused a multi-item run to stop after #1.
+        self.pending_queue = list(self.queue)
         self.queue_running = True
         self.start_btn.setEnabled(False)
         self.scan_btn.setEnabled(False)
         self.process_next()
     def process_next(self):
-        self.queue=[m for m in self.movies if m.queued]
-        if not self.queue:
+        if not self.queue_running:
+            return
+        if self.queue_advance_timer.isActive():
+            self.queue_advance_timer.stop()
+        if not self.pending_queue:
             self.queue_running = False
             self.start_btn.setEnabled(True)
             self.scan_btn.setEnabled(True)
@@ -3601,7 +5166,7 @@ class MainWindow(QMainWindow):
             )
             self.perform_queue_finish_action()
             return
-        movie=self.queue[0]
+        movie=self.pending_queue.pop(0)
         self.current_movie=movie
         self.current_started_at = time.monotonic()
         movie.status="Working"
@@ -3614,10 +5179,14 @@ class MainWindow(QMainWindow):
         )
         self.telemetry.set_current_job(
             movie.title,
-            len(self.queue) - 1,
+            len(self.pending_queue),
         )
         self.progress.setValue(0)
+        # Retain the worker until it has emitted finished/failed.  A local-only
+        # QRunnable reference is unsafe when the thread pool must queue the next
+        # job instead of starting it immediately.
         worker=EncodeWorker(movie,self.config)
+        self.active_encode_worker = worker
         worker.signals.progress.connect(self.progress_update)
         worker.signals.message.connect(self.status.setText)
         worker.signals.stage.connect(self.process_stage_changed)
@@ -3626,6 +5195,10 @@ class MainWindow(QMainWindow):
         )
         worker.signals.failed.connect(
             lambda msg,m=movie:self.encode_failed(m,msg)
+        )
+        log(
+            f"QUEUE START: {movie.title} | "
+            f"{len(self.pending_queue)} pending after this item"
         )
         self.pool.start(worker)
     def process_stage_changed(self, stage):
@@ -3649,25 +5222,41 @@ class MainWindow(QMainWindow):
 
         saved = max(0, movie.size - new_size)
         elapsed_text = format_runtime(elapsed)
-        remaining = len(
-            [
-                candidate
-                for candidate in self.movies
-                if candidate.queued
-            ]
-        )
+        remaining = len(self.pending_queue)
 
         self.status.setText(
-            f"Completed: {movie.title} — "
+            f"Completed: {movie.title}  "
             f"saved {human_size(saved)} in {elapsed_text}"
         )
         self.operations.set_process_status(
-            f"Complete: {movie.title} • "
-            f"saved {human_size(saved)} • "
+            f"Complete: {movie.title}  "
+            f"saved {human_size(saved)}  "
             f"{remaining} remaining"
         )
         self.populate_table()
 
+        if self.exit_after_current:
+            self.exit_after_current = False
+            self.queue_running = False
+            self.current_movie = None
+            self.telemetry.stop_and_hide()
+            self.start_btn.setEnabled(True)
+            self.scan_btn.setEnabled(True)
+            self.status.setText(
+                f"Completed {movie.title}. EMP will now close as requested."
+            )
+            self.operations.set_process_status(
+                "Current movie complete  exiting"
+            )
+            if self.tray_icon.isVisible():
+                self.tray_icon.showMessage(
+                    APP_NAME,
+                    "Current movie finished. EMP is closing.",
+                    QSystemTrayIcon.MessageIcon.Information,
+                    2500,
+                )
+            QTimer.singleShot(500, QApplication.instance().quit)
+            return
         if self.pause_after_current:
             self.pause_after_current = False
             self.queue_running = False
@@ -3689,11 +5278,29 @@ class MainWindow(QMainWindow):
             )
             return
 
-        # Briefly display the completed result before starting the next movie.
-        QTimer.singleShot(1800, self.process_next)
+        # Release our Python reference to the completed worker, then hand the
+        # queue back to the GUI event loop before starting the next one.  This
+        # avoids launching/replacing a QRunnable from inside its completion
+        # callback and guarantees the next worker remains strongly referenced.
+        self.active_encode_worker = None
+        log(
+            f"QUEUE DONE: {movie.title} | {remaining} item(s) pending | "
+            f"running={self.queue_running}"
+        )
+        if remaining > 0 and self.queue_running:
+            self.status.setText(
+                f"Completed: {movie.title}  starting next queue item..."
+            )
+            QTimer.singleShot(250, self.process_next)
+        else:
+            QTimer.singleShot(0, self.process_next)
     def encode_failed(self,movie,message):
         movie.status="Failed"
+        self.active_encode_worker = None
         self.queue_running = False
+        self.pending_queue = []
+        if self.queue_advance_timer.isActive():
+            self.queue_advance_timer.stop()
         self.telemetry.stop_and_hide()
         self.start_btn.setEnabled(True)
         self.scan_btn.setEnabled(True)
@@ -3755,6 +5362,164 @@ class MainWindow(QMainWindow):
         if self.table.rowCount():
             self.table.selectRow(max(0, self.table.currentRow()))
         self.status.setText("Movie library view active.")
+
+    def set_update_light(self, text: str, color: str, tip: str = ""):
+        self.update_button.setText(text)
+        self.update_button.setToolTip(tip)
+        self.update_button.setStyleSheet(
+            f"color:{color};font-weight:800;border-color:{color};"
+        )
+
+    def check_for_updates(self):
+        repo = str(self.config.get("github_repo", "")).strip() or DEFAULT_CONFIG["github_repo"]
+        self.config["github_repo"] = repo
+        self.latest_release = {"checking": True, "repo": repo}
+        self.update_checked_at = "Checking now..."
+        self.set_update_light(
+            "  CHECKING GITHUB...",
+            "#ffbd59",
+            f"Checking {repo} for the latest EMP build...",
+        )
+        worker = GitHubUpdateWorker(repo)
+        worker.signals.done.connect(self.on_update_checked)
+        self.pool.start(worker)
+
+    def on_update_checked(self, result: dict):
+        self.latest_release = result
+        self.update_checked_at = time.strftime("%Y-%m-%d %H:%M:%S")
+        if not result.get("ok"):
+            self.set_update_light(
+                "  UPDATE CHECK FAILED",
+                "#ff6879",
+                f"{result.get('error', 'Update check failed')}\nLast checked: {self.update_checked_at}\nClick for details or to retry.",
+            )
+        elif result.get("newer"):
+            source = "GitHub Release" if result.get("source") == "release" else f"Git {result.get('branch','main')} branch"
+            self.set_update_light(
+                f"  UPDATE {result.get('version','')} AVAILABLE",
+                "#d35cff",
+                f"Installed: {APP_VERSION}\nLatest: {result.get('version','?')}\nSource: {source}\nLast checked: {self.update_checked_at}\nClick to install.",
+            )
+        else:
+            source = "GitHub Release" if result.get("source") == "release" else f"Git {result.get('branch', 'main')} branch"
+            self.set_update_light(
+                "  UP TO DATE",
+                "#70df7b",
+                f"Installed: {APP_VERSION}\nLatest: {result.get('version', APP_VERSION)}\nRepository: {result.get('repo', DEFAULT_CONFIG['github_repo'])}\nSource: {source}\nLast checked: {self.update_checked_at}\nClick for details or to re-check.",
+            )
+
+    def install_github_update(self, result: dict):
+        try:
+            updates_dir = APP_DIR / "_updates"
+            updates_dir.mkdir(exist_ok=True)
+            target = updates_dir / (result.get("asset_name") or "EMP-update.zip")
+            self.set_update_light(
+                f"  DOWNLOADING {result.get('version','UPDATE')}...",
+                "#5db7ff",
+                "Downloading the selected EMP update from GitHub.",
+            )
+            QApplication.processEvents()
+            req = urllib.request.Request(
+                result["download_url"],
+                headers={"User-Agent": "EMP-Updater"},
+            )
+            with urllib.request.urlopen(req, timeout=60) as src, target.open("wb") as dst:
+                shutil.copyfileobj(src, dst)
+            new_version = launch_external_update(
+                target,
+                APP_DIR,
+                current_version=APP_VERSION,
+                current_pid=os.getpid(),
+            )
+            QMessageBox.information(
+                self,
+                "EMP update ready",
+                f"EMP {new_version} has been downloaded and validated.\n\n"
+                "EMP will now close, install the update, and reopen.",
+            )
+            QTimer.singleShot(250, QApplication.instance().quit)
+        except Exception as exc:
+            self.set_update_light(
+                "  UPDATE FAILED",
+                "#ff6879",
+                f"{exc}\nClick for details or to retry.",
+            )
+            QMessageBox.critical(self, "EMP update failed", str(exc))
+
+    def update_button_clicked(self):
+        result = self.latest_release or {}
+        if result.get("checking"):
+            QMessageBox.information(
+                self,
+                "EMP update check",
+                "EMP is currently checking GitHub for updates.",
+            )
+            return
+
+        repo = str(self.config.get("github_repo", "")).strip() or DEFAULT_CONFIG["github_repo"]
+        current = APP_VERSION
+        latest = result.get("version") or "Unknown"
+        source = (
+            "GitHub Release"
+            if result.get("source") == "release"
+            else f"Git {result.get('branch', 'main')} branch"
+        )
+
+        box = QMessageBox(self)
+        box.setWindowTitle("EMP Update Status")
+        box.setIcon(
+            QMessageBox.Icon.Information
+            if result.get("ok")
+            else QMessageBox.Icon.Warning
+        )
+        if result.get("ok") and result.get("newer"):
+            box.setText(f"EMP {latest} is available")
+            box.setInformativeText(
+                f"Installed version: {current}\n"
+                f"Latest version: {latest}\n"
+                f"Repository: {repo}\n"
+                f"Source: {source}\n"
+                f"Last checked: {self.update_checked_at}"
+            )
+            install_btn = box.addButton("Install Update", QMessageBox.ButtonRole.AcceptRole)
+        elif result.get("ok"):
+            box.setText("EMP is up to date")
+            box.setInformativeText(
+                f"Installed version: {current}\n"
+                f"Latest version: {latest}\n"
+                f"Repository: {repo}\n"
+                f"Source: {source}\n"
+                f"Last checked: {self.update_checked_at}"
+            )
+            install_btn = None
+        else:
+            box.setText("EMP could not check for updates")
+            box.setInformativeText(
+                f"Repository: {repo}\n"
+                f"Last checked: {self.update_checked_at}\n\n"
+                f"{result.get('error', 'No update information is available yet.')}"
+            )
+            install_btn = None
+
+        check_btn = box.addButton("Check Again", QMessageBox.ButtonRole.ActionRole)
+        repo_btn = box.addButton("Open GitHub", QMessageBox.ButtonRole.ActionRole)
+        box.addButton(QMessageBox.StandardButton.Close)
+        box.exec()
+
+        clicked = box.clickedButton()
+        if install_btn is not None and clicked is install_btn:
+            if result.get("download_url"):
+                self.install_github_update(result)
+            else:
+                QMessageBox.warning(
+                    self,
+                    "EMP update",
+                    "The GitHub release does not contain a downloadable EMP ZIP yet.",
+                )
+        elif clicked is check_btn:
+            self.check_for_updates()
+        elif clicked is repo_btn:
+            QDesktopServices.openUrl(QUrl(f"https://github.com/{repo}"))
 
     def show_update_center(self):
         dialog = SettingsDialog(self.config, self)
@@ -3824,20 +5589,23 @@ class MainWindow(QMainWindow):
             self.config=dialog.values()
             save_config(self.config)
             self.operations.config=self.config
+            self.apply_style()
             self.operations.refresh_services()
             self.status.setText(
-                "Settings saved. Run a new scan to apply library changes."
+                f"Settings saved. Theme: {self.config.get('theme', 'Skull Purple')}; "
+                f"banner: {self.config.get('banner_theme', 'Original Purple')}; "
+                f"text size: {self.config.get('ui_scale_percent', 100)}%."
             )
     def show_help(self): HelpDialog(self).exec()
     def show_about(self):
         QMessageBox.about(
             self,
             APP_NAME,
-            f"<h2>Evil's Media Optimizer {APP_VERSION}</h2>"
+            f"<h2>Evil's Media Encoding Platform {APP_VERSION}</h2><p><b>Powered by EMO</b></p>"
             "<p>A media optimization dashboard with automatic Jellyfin "
             "poster caching, queue management, hidden-console launching, "
             "a modular media optimizer with safe HandBrake/NVENC encoding, Jellyfin posters, live telemetry and a resilient external updater.</p>"
-            "<p>Open <b>Settings → Updates</b> to install future fixes "
+            "<p>Open <b>Settings  Updates</b> to install future fixes "
             "without losing your settings or cache.</p>"
             "<p>Built for Jason's VaultOne media workflow.</p>",
         )
@@ -3847,16 +5615,16 @@ class MainWindow(QMainWindow):
         QMessageBox.information(
             self,
             "Jellyfin",
-            ("✓ " if ok else "✕ ")
+            (" " if ok else " ")
             + detail
             + "\n\nPosters use this Jellyfin connection. "
-            "Configure it under Settings → Integrations.",
+            "Configure it under Settings  Integrations.",
         )
     def show_history(self):
         if not HISTORY_FILE.exists(): QMessageBox.information(self,"History","No completed encodes have been recorded yet."); return
         try: rows=json.loads(HISTORY_FILE.read_text(encoding='utf-8'))
         except Exception: rows=[]
-        text='\n'.join(f"{r.get('completed','')} — {r.get('movie','')} — saved {human_size(max(0,r.get('original',0)-r.get('new',0)))}" for r in rows[-30:]) or 'No history.'; QMessageBox.information(self,"Recent history",text)
+        text='\n'.join(f"{r.get('completed','')}  {r.get('movie','')}  saved {human_size(max(0,r.get('original',0)-r.get('new',0)))}" for r in rows[-30:]) or 'No history.'; QMessageBox.information(self,"Recent history",text)
     def show_statistics(self):
         if not HISTORY_FILE.exists(): QMessageBox.information(self,"Statistics","No completed encodes yet."); return
         try: rows=json.loads(HISTORY_FILE.read_text(encoding='utf-8'))
@@ -3887,7 +5655,7 @@ def install_exception_handler() -> None:
         if QApplication.instance() is not None:
             QMessageBox.critical(
                 None,
-                f"{APP_NAME} — Error",
+                f"{APP_NAME}  Error",
                 "Something went wrong. The error has been saved to:\n\n"
                 f"{LOG_FILE}\n\n"
                 f"{exc_value}",
@@ -3897,5 +5665,21 @@ def install_exception_handler() -> None:
 
 def main():
     install_exception_handler()
-    app=QApplication(sys.argv); app.setApplicationName(APP_NAME); window=MainWindow(); window.show(); return app.exec()
+    app = QApplication(sys.argv)
+    app.setApplicationName(APP_NAME)
+    config = load_config()
+    force_platform_builder = "--platform-builder" in sys.argv or "--setup" in sys.argv
+    if force_platform_builder or not bool(config.get("setup_complete", False)):
+        wizard = PlatformSetupWizard(config, first_run=True)
+        wizard.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
+        wizard.show()
+        wizard.raise_()
+        wizard.activateWindow()
+        if wizard.exec() != QDialog.DialogCode.Accepted:
+            return 0
+        save_config(wizard.values())
+    window = MainWindow()
+    window.show()
+    return app.exec()
 if __name__=='__main__': raise SystemExit(main())
+
