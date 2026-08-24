@@ -6,6 +6,10 @@ on:
       - main
     paths:
       - '.github/workflows/recover-emp-baseline-from-main.yml'
+  pull_request:
+    branches:
+      - main
+    types: [opened, synchronize, reopened]
   workflow_dispatch:
 
 permissions:
