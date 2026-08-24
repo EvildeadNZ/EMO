@@ -1,2 +1,2 @@
 Trigger GitHub Actions recovery verification after repository Actions settings were enabled on 2026-08-25.
-Checkout permission isolation trigger: 09:16 NZST.
+Write-permission isolation trigger: 09:16 NZST.
