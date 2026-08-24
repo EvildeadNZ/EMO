@@ -12,15 +12,37 @@ This file is the persistent handoff for Evil's Media Encoding Platform (EMP). Re
 - Creator credit: Designed and Developed by Jason Seath
 - Current development line: EMP 5.0
 - Known-good updater baseline: 5.0.0-m2
-- Current release: 5.0.0-m2.3.1
+- Current recovery candidate: 5.0.0-m2.8-recovery1
 
 ## Current verified state
 
 EMP 5.0.0-m2 successfully completed the project's first real end-to-end self-update through GitHub: EMP detected the newer GitHub Release, downloaded the attached EMP ZIP asset, installed it, and restarted successfully.
 
-Treat 5.0.0-m2 as the known-good updater baseline unless a newer release is explicitly verified through the same full update path.
+Treat 5.0.0-m2 as the known-good **updater** baseline until a newer release is explicitly verified through the same full update path.
+
+On 2026-08-25 the repository source was reconciled after discovering that `emo/main_window.py` on `main` had fallen behind later EMP development/release documentation. The later working August 16 source was recovered, syntax-checked, transported into GitHub with cryptographic verification, and transplanted onto the clean branch `emp-5-recovery-clean` as `5.0.0-m2.8-recovery1`.
+
+Recovery verification:
+
+- Recovered `emo/main_window.py` SHA-256: `4b766157a58b6be7fbebd1a2a8e70c15802bbd5373d302bcbc3771631e744798`
+- Recovered `emo/main_window.py` Git blob: `b8de6526740b4f868acac90f7ca6bffcc7b4978a`
+- GitHub Actions recovery run: `32779877043` — completed successfully
+- The recovery job verified the compressed transport hash, decompressed the source, verified the final source SHA-256, Python-compiled it, then committed it.
+
+`5.0.0-m2.8-recovery1` is a **source-verified recovery candidate**, not yet a public release. It must be launched and exercised on the Windows EMP workstation before publishing a release ZIP or using it as the bootstrap-installer target.
 
 ## Current release line
+
+### 5.0.0-m2.8-recovery1 - Recovered Verified Baseline
+
+- Restores the August 16 working EMP source after the repository executable source was found to be stale.
+- Restores the multi-file queue snapshot/lifetime fix so processing continues beyond the first queued item.
+- Restores the strong active-worker reference used by queued follow-up encoding jobs.
+- Restores process-safe close and Windows system-tray handling from the `m2.7-hf4` lineage.
+- Restores **Finish current movie, then exit**, **Keep processing**, and **Minimize to hidden icons** while processing is active.
+- Restores Platform Builder, guided Jellyfin authentication/API-key setup, UI text scaling, themes/banner handling, update-status work and **Exclude Already Efficient**.
+- Restores the missing service-status traffic-light indicator and the repaired encoding-calculation source block.
+- Recovery source is cryptographically verified and Python syntax-checked, but Windows/PySide6 runtime testing is still required before publication.
 
 ### 5.0.0-m2.1 - Easier Jellyfin Setup
 
@@ -53,7 +75,7 @@ Treat 5.0.0-m2 as the known-good updater baseline unless a newer release is expl
 - Replaces the first Red Ember banner with the approved higher-quality banner asset.
 - This is a visual-only hotfix; Original Purple and functional behaviour are unchanged.
 - GitHub Release `v5.0.0-m2.3.1` exists with the official EMP ZIP attached.
-- Repository version metadata and update manifest have been synchronized to 5.0.0-m2.3.1.
+- Repository version metadata and update manifest were synchronized to 5.0.0-m2.3.1 at that point in development.
 
 ## Product direction
 
@@ -70,6 +92,7 @@ Core principle: do not add a feature unless a first-time user can understand how
 - `LIVE TO ENCODE / ENCODE TO LIVE` and `NO BITRATE LEFT BEHIND` were removed from the dashboard in the m2 line.
 - Approved banner/theme set currently includes Original Purple and Red Ember.
 - When additional banner themes are requested later, add them through the same Appearance banner library rather than creating one-off controls.
+- Public-foundation work added a dedicated About/Credits/Licence system and third-party notices. Preserve that integration when testing and merging the recovered source.
 
 ## Installer and first-run behaviour
 
@@ -81,6 +104,7 @@ Core principle: do not add a feature unless a first-time user can understand how
 - Installing/reinstalling must force Platform Builder when requested even if an old config contains `setup_complete: true`.
 - Platform Builder and Settings should guide users to HandBrake, GPU, NAS/network paths, media locations, server/workflow options and Jellyfin.
 - Setup choices must remain editable later in Settings.
+- Do not build the public bootstrap installer against stale or untested source. The recovered baseline must pass Windows runtime/queue/process-safety testing first.
 
 ## Encoding/workflow vision
 
@@ -115,6 +139,18 @@ On startup EMP checks for updates. Clicking status opens an Update Status dialog
 
 The old m1.2 checker preferred GitHub Releases over `update-package.json`, allowing an old 4.1.0 release to hide newer manifest versions. The old version parser also treated `m1.2` and `m1.3` as effectively equal. The bridge release was promoted to `5.0.0-m2`, which the old parser could recognize as newer. Publishing an actual GitHub Release with the EMP ZIP attached allowed the first self-update to succeed.
 
+### Lessons from the 2026-08 source recovery
+
+Release notes and patch files are not substitutes for keeping the executable source current. GitHub can only be the source of truth when later working source changes are actually committed.
+
+For every functional patch going forward:
+
+1. Update the actual source first on a branch.
+2. Syntax-check/build the exact source that will be committed.
+3. Commit the source and version metadata together.
+4. Add release notes/changelog after the source commit exists.
+5. Verify the branch source corresponds to the tested build before merging or publishing.
+
 For future releases:
 
 1. Build and syntax-check the new EMP package.
@@ -127,7 +163,7 @@ For future releases:
 
 ## Version/release conventions
 
-Examples: `5.0.0-m2`, `5.0.0-m2.1`, `5.0.0-m2.2`, `5.0.0-m2.3`, `5.0.0-m2.3.1`, `5.0.0-rc1`, `5.0.0`.
+Examples: `5.0.0-m2`, `5.0.0-m2.1`, `5.0.0-m2.2`, `5.0.0-m2.3`, `5.0.0-m2.3.1`, `5.0.0-m2.8-recovery1`, `5.0.0-rc1`, `5.0.0`.
 
 Each release should maintain application source/version metadata, `CHANGELOG.md`, `update-package.json`, user-facing GitHub release notes and the actual EMP update ZIP asset.
 
@@ -135,20 +171,23 @@ Each release should maintain application source/version metadata, `CHANGELOG.md`
 
 Do not rely on a ChatGPT conversation as the only copy of EMP work. GitHub is the authoritative persistent project record. Keep current source/build inputs, source patches, documentation, changelog, update metadata and release history in the repository wherever practical. Official release ZIPs should be retained as GitHub Release assets.
 
+A patch file or release note does **not** count as the current implementation unless the matching source change is also present in the repository's executable source.
+
 ## Near-term roadmap
 
-- Continue dashboard/readability/usability polish.
-- Expand the Appearance banner/theme library when new approved designs are requested.
-- Finish installer and Platform Builder polish.
-- Improve update error states and updater reliability.
-- Add startup diagnostics/logging and exportable diagnostics.
-- Platform Health for HandBrake, GPU, storage, NAS and Jellyfin.
-- Useful encoding/storage statistics.
-- Encoding/profile improvements and better workflow automation.
-- Explore distributed/server encoding, NAS-local workflows, Jellyfin and Radarr/Sonarr integrations.
+1. Runtime-test `5.0.0-m2.8-recovery1` on the Windows EMP workstation, including a two-item queue and all protected-close/tray paths.
+2. Merge the clean recovery baseline only after that test passes.
+3. Continue public-distribution readiness: licensing/credits verification, GitHub release packaging and bootstrap installer.
+4. Redesign the UI toward a polished professional application while retaining EMP identity.
+5. Add optional donation/support mechanisms without paid feature tiers.
+6. Improve startup diagnostics/logging and exportable diagnostics.
+7. Continue Platform Health and encoding/profile/workflow improvements.
+8. Explore distributed/server encoding, NAS-local workflows, Jellyfin and Radarr/Sonarr integrations.
 
 ## Development workflow for a new ChatGPT conversation
 
 When the user types `EMO`, treat it as the shortcut to resume this project: open `EvildeadNZ/EMO`, read `docs/EMP_PROJECT_STATE.md`, inspect the current repository/release state, and continue EMP development from the current code and documentation.
+
+Until the recovery candidate is merged, inspect `emp-5-recovery-clean` as the current source-recovery candidate in addition to `main`.
 
 Update this file after meaningful feature, architecture, release, known-issue or workflow changes.
