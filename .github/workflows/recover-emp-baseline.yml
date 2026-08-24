@@ -80,4 +80,4 @@ jobs:
           git commit -m "recovery: restore hash-verified EMP working baseline"
           git push origin HEAD:emp-5-recovery-baseline
 
-# Permission retrigger: 2026-08-25
+# Permission retrigger: 2026-08-25 09:16 NZST
