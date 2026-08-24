@@ -1,4 +1,4 @@
-name: Actions checkout test
+name: Actions write-permission test
 
 on:
   pull_request:
@@ -6,11 +6,12 @@ on:
       - main
     types: [opened, synchronize, reopened]
 
+permissions:
+  contents: write
+
 jobs:
-  checkout_test:
+  permission_test:
     runs-on: ubuntu-latest
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-      - name: Confirm checkout worked
-        run: echo "Checkout OK"
+      - name: Confirm job can start with write permission
+        run: echo "Write-permission workflow started"
