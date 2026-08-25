@@ -1,0 +1,10 @@
+*** EMP recovery hotfix 2 ***
+
+Fix HandBrake target-bitrate calculation:
+
+- total_kbps = (target_bytes * 8 * 0.96) / (duration / 1000)
++ total_kbps = (target_bytes * 8 * 0.96) / duration / 1000
+
+The previous expression divided the duration by 1000 before dividing the target bits, inflating the requested kbps by approximately 1,000,000x.
+
+The local patcher verifies the exact HF1 source SHA-256 before changing anything, applies only this bitrate formula correction, Python-compiles the result, verifies the expected HF2 source SHA-256, and updates local recovery version metadata to 5.0.0-m2.8-recovery1-hf2.

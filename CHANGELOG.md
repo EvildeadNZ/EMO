@@ -1,5 +1,27 @@
 # Changelog
 
+## 5.0.0-m2.8-recovery1-hf1 - HandBrake Launch Hotfix
+
+- Fixed invalid `subprocess.list2cmd1` call in the recovered encoding worker.
+- HandBrake can now launch normally after the local working copy is prepared.
+- Failure safety remains unchanged: the NAS original is preserved and useful local work files may be retained after a failed encode start.
+
+## 5.0.0-m2.8-recovery1 - Recovered Verified Baseline
+
+### What changed
+- Restored the hash-verified August 16 EMP working source after discovering that the repository's executable `main_window.py` had fallen behind later development/release documentation.
+- Restored the multi-file queue snapshot/lifetime fix so processing continues beyond the first queued movie.
+- Restored the active encode-worker lifetime fix used by queued follow-up jobs.
+- Restored process-safe closing and Windows system-tray behaviour from the `m2.7-hf4` lineage.
+- Restored Platform Builder, guided Jellyfin setup, UI text scaling, themes/banner handling, update-status work and the **Exclude Already Efficient** control.
+- Restored the missing service-status traffic-light indicator and the repaired encoding-calculation source block.
+
+### Recovery verification
+- Recovered-source SHA-256: `4b766157a58b6be7fbebd1a2a8e70c15802bbd5373d302bcbc3771631e744798`.
+- Verified Git blob for `emo/main_window.py`: `b8de6526740b4f868acac90f7ca6bffcc7b4978a`.
+- GitHub recovery run `32779877043` verified the compressed transport, final source hash and Python syntax before committing the recovered source.
+- This remains a recovery candidate until the restored application is exercised on the Windows EMP workstation.
+
 ## 5.0.0-m2.3.1 - Red Ember HQ Hotfix
 
 ### What changed

@@ -1,12 +1,15 @@
 {
   "name": "Evil's Media Encoding Platform",
-  "version": "5.0.0-m2.4",
+  "version": "5.0.0-m2.8-recovery1-hf1",
   "minimum_updater_version": "5.0.0-m2",
   "architecture": "modular",
   "notes": [
-    "Hotfix: replaces the Red Ember banner with the higher-quality full-width image.",
-    "Improves sharpness, detail and readability on large/high-resolution displays.",
-    "Renumbered from m2.3.1 to m2.4 so existing EMP version comparison detects the update correctly.",
-    "No functional changes: theme selection, UI Text Size, libraries and integrations remain unchanged."
+    "Hotfix: corrected subprocess.list2cmd1 to subprocess.list2cmdline so HandBrake can launch during encoding.",
+    "Recovered and hash-verified EMP 5 working baseline from the August 16 development source.",
+    "Restores the multi-file queue lifetime/snapshot fix so processing continues beyond the first item.",
+    "Restores process-safe close and system-tray behavior from the m2.7-hf4 lineage.",
+    "Restores Platform Builder, guided Jellyfin setup, UI text scaling, themes, update checks and later working-source fixes.",
+    "Restores the missing service-status traffic-light indicator and repairs the corrupted encoding calculation block.",
+    "This recovery release reconciles GitHub source with the later working EMP code before bootstrap-installer work begins."
   ]
 }
