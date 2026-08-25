@@ -8,3 +8,5 @@ Fix HandBrake target-bitrate calculation:
 The previous expression divided the duration by 1000 before dividing the target bits, inflating the requested kbps by approximately 1,000,000x.
 
 Also retain the last 20 non-empty HandBrake output lines and include them in the raised RuntimeError when HandBrake exits non-zero, so future encoder failures show the actual HandBrake cause instead of only the exit code.
+
+PR trigger: apply verified HF2 patch.
