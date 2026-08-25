@@ -1,0 +1,97 @@
+name: EMP recovery HF2 reopened patch
+
+on:
+  pull_request:
+    branches:
+      - main
+    types: [reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Apply hash-gated HF2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          git clone --branch emp-5-recovery-pr --single-branch https://github.com/EvildeadNZ/EMO.git emp-hf2
+          cd emp-hf2
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib, json, py_compile
+
+          p = Path('emo/main_window.py')
+          before = hashlib.sha256(p.read_bytes()).hexdigest()
+          if before != '47648049aa9775b8b5b860c12ad38b3858174e5b8d09bc092771cc47222d1c83':
+              raise SystemExit(f'Refusing patch: unexpected HF1 source SHA-256 {before}')
+
+          text = p.read_text(encoding='utf-8')
+          old = 'total_kbps = (target_bytes * 8 * 0.96) / (duration / 1000)'
+          new = 'total_kbps = (target_bytes * 8 * 0.96) / duration / 1000'
+          assert text.count(old) == 1
+          text = text.replace(old, new, 1)
+
+          old = '''        assert process.stdout is not None
+        for raw in process.stdout:
+            line = raw.rstrip()
+            log(line)
+            if "Encoding:" in line:
+'''
+          new = '''        assert process.stdout is not None
+        recent_lines = deque(maxlen=20)
+        for raw in process.stdout:
+            line = raw.rstrip()
+            log(line)
+            if line:
+                recent_lines.append(line)
+            if "Encoding:" in line:
+'''
+          assert text.count(old) == 1
+          text = text.replace(old, new, 1)
+
+          old = '''        code = process.wait()
+        if code != 0:
+            raise RuntimeError(f"HandBrake failed with exit code {code}.")
+'''
+          new = '''        code = process.wait()
+        if code != 0:
+            details = "\\n".join(recent_lines)
+            if details:
+                raise RuntimeError(
+                    f"HandBrake failed with exit code {code}.\\n\\n"
+                    f"Last HandBrake output:\\n{details}"
+                )
+            raise RuntimeError(f"HandBrake failed with exit code {code}.")
+'''
+          assert text.count(old) == 1
+          text = text.replace(old, new, 1)
+
+          p.write_text(text, encoding='utf-8', newline='\n')
+          py_compile.compile(str(p), doraise=True)
+          after = hashlib.sha256(p.read_bytes()).hexdigest()
+          if after != 'bdc8076eca20f0877c1cd803c9d1b696b95a0fef9519e9a47b3f4a9b1aee713e':
+              raise SystemExit(f'Patched source hash mismatch: {after}')
+
+          version = '5.0.0-m2.8-recovery1-hf2'
+          Path('emo/version.py').write_text(f'APP_VERSION = "{version}"\n', encoding='utf-8')
+          manifest_path = Path('update-package.json')
+          manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+          manifest['version'] = version
+          manifest['notes'] = [
+              'Hotfix 2: corrected target bitrate calculation that could request an impossibly high NVENC bitrate and cause HandBrake exit code 3.',
+              'HandBrake failures now include the last 20 output lines so future encoder errors show their actual cause.',
+              'Hotfix 1: corrected subprocess.list2cmd1 to subprocess.list2cmdline so HandBrake can launch during encoding.'
+          ] + [n for n in manifest.get('notes', []) if not str(n).startswith('Hotfix')]
+          manifest_path.write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')
+          print('HF2 source SHA-256:', after)
+          PY
+          git config user.name "EMP Recovery"
+          git config user.email "actions@users.noreply.github.com"
+          git add emo/main_window.py emo/version.py update-package.json
+          git commit -m "fix: correct HandBrake target bitrate calculation"
+          git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/EvildeadNZ/EMO.git"
+          git push origin HEAD:emp-5-recovery-pr
