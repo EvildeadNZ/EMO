@@ -1,0 +1,12 @@
+{
+  "name": "Evil's Media Encoding Platform 5.0 Milestone 1",
+  "version": "5.0.0-m1",
+  "architecture": "modular",
+  "notes": [
+    "Adds GitHub release update status light on the main dashboard.",
+    "Checks for the latest release automatically on startup.",
+    "Clicking an available update downloads, validates, installs and restarts EMP.",
+    "Adds GitHub repository setting under Settings > Updates.",
+    "Adds GitHub Actions release workflow and milestone-aware version comparison."
+  ]
+}

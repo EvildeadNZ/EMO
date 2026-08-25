@@ -1,0 +1,11 @@
+{
+  "name": "Evil's Media Encoding Platform 5.0 Preview 1",
+  "version": "5.0.0-preview1",
+  "minimum_updater_version": "4.0.0",
+  "architecture": "modular",
+  "notes": [
+    "Fixes the processing queue stopping after the first completed movie.",
+    "Uses a persistent queue-advance timer so the next queued movie starts automatically.",
+    "Keeps the existing safe pause-after-current behaviour when deliberately enabled."
+  ]
+}

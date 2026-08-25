@@ -1,0 +1,173 @@
+diff --git a/emo/main_window.py b/emo/main_window.py
+--- a/emo/main_window.py
++++ b/emo/main_window.py
+@@ -26,7 +26,7 @@ except ImportError:
+
+ from PySide6.QtCore import QObject, QRunnable, QThreadPool, Qt, Signal, QSize, QTimer, QRectF
+-from PySide6.QtGui import QColor, QPixmap, QIcon, QPainter, QPainterPath, QPen, QBrush
++from PySide6.QtGui import QColor, QPixmap, QIcon, QPainter, QPainterPath, QPen, QBrush, QCloseEvent, QAction
+ from PySide6.QtWidgets import (
+     QApplication, QCheckBox, QComboBox, QDialog, QDialogButtonBox, QFileDialog,
+     QFormLayout, QFrame, QGridLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMainWindow,
+     QMessageBox, QProgressBar, QPushButton, QSpinBox, QSplitter, QStackedLayout,
+     QTableWidget, QTableWidgetItem, QTextBrowser, QVBoxLayout, QWidget, QListWidget, QScrollArea,
+-    QListWidgetItem, QTabWidget, QGroupBox, QAbstractItemView,
++    QListWidgetItem, QTabWidget, QGroupBox, QAbstractItemView, QSystemTrayIcon, QMenu,
+ )
+@@ -722,6 +722,7 @@ class MainWindow(QMainWindow):
+         self.current_started_at = 0.0
+         self.pause_after_current = False
+         self.queue_running = False
++        self.exit_after_current = False
+         self.setWindowTitle(f"{APP_NAME} {APP_VERSION}"); self.setWindowIcon(QIcon(str(APP_DIR/'assets'/'evils_skull.ico'))); self.resize(1660, 980); self.setMinimumSize(1320, 800)
+         self.build_ui()
++        self.setup_system_tray()
+         self.apply_style()
+@@ -730,6 +731,60 @@ class MainWindow(QMainWindow):
+             self.operations.refresh_services
+         )
+         self.operations_timer.start()
+         QTimer.singleShot(
+             500,
+             self.operations.refresh_services,
+         )
+
++    def setup_system_tray(self):
++        self.tray_icon = QSystemTrayIcon(
++            QIcon(str(APP_DIR / "assets" / "evils_skull.ico")),
++            self,
++        )
++        self.tray_icon.setToolTip(f"{APP_NAME} {APP_VERSION}")
++
++        menu = QMenu(self)
++        restore_action = QAction("Restore EMP", self)
++        restore_action.triggered.connect(self.restore_from_tray)
++        menu.addAction(restore_action)
++        menu.addSeparator()
++
++        exit_action = QAction("Exit EMP", self)
++        exit_action.triggered.connect(self.request_exit)
++        menu.addAction(exit_action)
++
++        self.tray_icon.setContextMenu(menu)
++        self.tray_icon.activated.connect(self.tray_activated)
++        if QSystemTrayIcon.isSystemTrayAvailable():
++            self.tray_icon.show()
++
++    def tray_activated(self, reason):
++        if reason in {
++            QSystemTrayIcon.ActivationReason.Trigger,
++            QSystemTrayIcon.ActivationReason.DoubleClick,
++        }:
++            self.restore_from_tray()
++
++    def restore_from_tray(self):
++        self.show()
++        self.setWindowState(
++            self.windowState() & ~Qt.WindowState.WindowMinimized
++        )
++        self.raise_()
++        self.activateWindow()
++
++    def minimize_to_tray(self):
++        if not hasattr(self, "tray_icon"):
++            return
++        if not self.tray_icon.isVisible():
++            self.tray_icon.show()
++        self.hide()
++        self.tray_icon.showMessage(
++            APP_NAME,
++            "EMP is still running. The current movie will continue safely.",
++            QSystemTrayIcon.MessageIcon.Information,
++            4000,
++        )
++
++    def request_exit(self):
++        if self.queue_running and self.current_movie is not None:
++            self.restore_from_tray()
++            self.close()
++            return
++        self.exit_after_current = False
++        self.close()
++
++    def request_exit_after_current(self):
++        if not self.queue_running or self.current_movie is None:
++            self.close()
++            return
++        self.exit_after_current = True
++        self.status.setText(
++            "Exit requested — the current movie will finish, then EMP will close."
++        )
++        self.operations.set_process_status("Exit requested after current movie")
++        if self.tray_icon.isVisible():
++            self.tray_icon.showMessage(
++                APP_NAME,
++                "Exit queued. EMP will close after the current movie finishes.",
++                QSystemTrayIcon.MessageIcon.Information,
++                5000,
++            )
++
++    def closeEvent(self, event: QCloseEvent):
++        if self.queue_running and self.current_movie is not None:
++            choice = QMessageBox(self)
++            choice.setIcon(QMessageBox.Icon.Warning)
++            choice.setWindowTitle("Movie processing is active")
++            choice.setText("EMP is currently processing a movie.")
++            choice.setInformativeText(
++                f'Do you want EMP to finish "{self.current_movie.title}" before closing?'
++            )
++
++            finish_exit = choice.addButton(
++                "Finish current movie, then exit",
++                QMessageBox.ButtonRole.AcceptRole,
++            )
++            choice.addButton(
++                "Keep processing",
++                QMessageBox.ButtonRole.RejectRole,
++            )
++            minimize = choice.addButton(
++                "Minimize to hidden icons",
++                QMessageBox.ButtonRole.DestructiveRole,
++            )
++            choice.exec()
++
++            if choice.clickedButton() is finish_exit:
++                self.request_exit_after_current()
++            elif choice.clickedButton() is minimize:
++                self.minimize_to_tray()
++
++            event.ignore()
++            return
++
++        if hasattr(self, "tray_icon"):
++            self.tray_icon.hide()
++        event.accept()
++
+@@ -1450,6 +1505,22 @@ class MainWindow(QMainWindow):
+         )
+         self.populate_table()
+
++        if self.exit_after_current:
++            self.exit_after_current = False
++            self.queue_running = False
++            self.current_movie = None
++            self.telemetry.stop_and_hide()
++            self.start_btn.setEnabled(True)
++            self.scan_btn.setEnabled(True)
++            self.status.setText(
++                f"Completed {movie.title}. EMP will now close as requested."
++            )
++            self.operations.set_process_status("Current movie complete — exiting")
++            if self.tray_icon.isVisible():
++                self.tray_icon.showMessage(
++                    APP_NAME,
++                    "Current movie finished. EMP is closing.",
++                    QSystemTrayIcon.MessageIcon.Information,
++                    2500,
++                )
++            QTimer.singleShot(500, QApplication.instance().quit)
++            return
++
+         if self.pause_after_current:
+             self.pause_after_current = False
+             self.queue_running = False

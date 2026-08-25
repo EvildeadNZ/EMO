@@ -1,0 +1,12 @@
+config.json
+history.json
+cache/
+_updates/
+__pycache__/
+*.pyc
+*.log
+*.zip
+build/
+dist/
+venv/
+.venv/

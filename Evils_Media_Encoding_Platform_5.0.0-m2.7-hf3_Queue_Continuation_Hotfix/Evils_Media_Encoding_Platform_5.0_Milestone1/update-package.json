@@ -1,0 +1,12 @@
+﻿{
+    "architecture":  "modular",
+    "minimum_updater_version":  "5.0.0-m2",
+    "name":  "Evil\u0027s Media Encoding Platform",
+    "version":  "5.0.0-m2.7-hf4",
+    "notes":  [
+                  "Ultra-urgent process-safety hotfix: EMP cannot close while a movie is actively being processed.",
+                  "Closing during active processing offers Finish current movie, then exit; Keep processing; or Minimize to hidden icons.",
+                  "A Windows system-tray icon provides Restore EMP and Exit EMP controls.",
+                  "Exit is queued safely and the current movie is allowed to finish before EMP closes."
+              ]
+}

@@ -1,0 +1,12 @@
+{
+  "name": "Evil's Media Encoding Platform 5.0 Milestone 1 Update Light",
+  "version": "5.0.0-m1.2",
+  "architecture": "modular",
+  "notes": [
+    "Completes the GitHub update status light for EvildeadNZ/EMO.",
+    "Shows installed and latest versions plus last-check time in the tooltip and status dialog.",
+    "Clicking the update indicator opens a detailed status panel with Check Again and Open GitHub actions.",
+    "When a newer build is available, the status panel offers one-click download, validation, install and restart.",
+    "Adds explicit checking, downloading, current, available and failure states with readable explanations."
+  ]
+}
