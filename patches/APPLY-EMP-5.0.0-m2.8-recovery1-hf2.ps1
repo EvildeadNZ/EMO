@@ -13,25 +13,27 @@ version_file = root / "emo" / "version.py"
 manifest_file = root / "update-package.json"
 
 expected_before = "47648049aa9775b8b5b860c12ad38b3858174e5b8d09bc092771cc47222d1c83"
-expected_after = "b0639c96c5564d62cf11512d11b29121f9d988c7a9c05b380d577b3593cfc8f6"
 
-before = hashlib.sha256(source.read_bytes()).hexdigest()
+raw = source.read_bytes()
+normalized = raw.replace(b"\r\n", b"\n")
+before = hashlib.sha256(normalized).hexdigest()
 if before != expected_before:
-    raise SystemExit(f"Refusing patch: unexpected EMP HF1 source SHA-256: {before}")
+    raise SystemExit(f"Refusing patch: unexpected normalized EMP HF1 source SHA-256: {before}")
 
-text = source.read_text(encoding="utf-8")
-old = "total_kbps = (target_bytes * 8 * 0.96) / (duration / 1000)"
-new = "total_kbps = (target_bytes * 8 * 0.96) / duration / 1000"
-if text.count(old) != 1:
+old = b"total_kbps = (target_bytes * 8 * 0.96) / (duration / 1000)"
+new = b"total_kbps = (target_bytes * 8 * 0.96) / duration / 1000"
+if raw.count(old) != 1:
     raise SystemExit("Refusing patch: expected exactly one broken bitrate formula")
 
-text = text.replace(old, new, 1)
-source.write_text(text, encoding="utf-8", newline="\n")
+expected_after = hashlib.sha256(normalized.replace(old, new, 1)).hexdigest()
+patched = raw.replace(old, new, 1)
+source.write_bytes(patched)
 py_compile.compile(str(source), doraise=True)
 
-after = hashlib.sha256(source.read_bytes()).hexdigest()
+after_normalized = source.read_bytes().replace(b"\r\n", b"\n")
+after = hashlib.sha256(after_normalized).hexdigest()
 if after != expected_after:
-    raise SystemExit(f"Refusing patch: unexpected HF2 source SHA-256: {after}")
+    raise SystemExit(f"Refusing patch: unexpected normalized HF2 source SHA-256: {after}")
 
 version = "5.0.0-m2.8-recovery1-hf2"
 version_file.write_text(f'APP_VERSION = "{version}"\n', encoding="utf-8")
@@ -45,7 +47,7 @@ manifest["notes"] = [
 manifest_file.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
 
 print("EMP HF2 applied successfully")
-print("Source SHA-256:", after)
+print("Normalized source SHA-256:", after)
 print("Version:", version)
 '@
 
