@@ -7,6 +7,4 @@ Fix HandBrake target-bitrate calculation:
 
 The previous expression divided the duration by 1000 before dividing the target bits, inflating the requested kbps by approximately 1,000,000x.
 
-Also retain the last 20 non-empty HandBrake output lines and include them in the raised RuntimeError when HandBrake exits non-zero, so future encoder failures show the actual HandBrake cause instead of only the exit code.
-
-PR trigger: apply verified HF2 patch.
+The local patcher verifies the exact HF1 source SHA-256 before changing anything, applies only this bitrate formula correction, Python-compiles the result, verifies the expected HF2 source SHA-256, and updates local recovery version metadata to 5.0.0-m2.8-recovery1-hf2.
