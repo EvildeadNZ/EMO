@@ -1,0 +1,76 @@
+name: EMP recovery hf1 patch
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/emp-recovery-hf1.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Patch recovery candidate without external Actions
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          git clone --branch emp-5-recovery-pr --single-branch https://github.com/EvildeadNZ/EMO.git emp
+          cd emp
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib, json, py_compile
+
+          p = Path('emo/main_window.py')
+          data = p.read_bytes()
+          before = hashlib.sha256(data).hexdigest()
+          expected = '4b766157a58b6be7fbebd1a2a8e70c15802bbd5373d302bcbc3771631e744798'
+          if before != expected:
+              raise SystemExit(f'Unexpected recovery source hash before hotfix: {before}')
+
+          text = data.decode('utf-8')
+          old = 'subprocess.list2cmd1(command)'
+          new = 'subprocess.list2cmdline(command)'
+          if text.count(old) != 1:
+              raise SystemExit(f'Expected exactly one broken call; found {text.count(old)}')
+          text = text.replace(old, new, 1)
+          p.write_text(text, encoding='utf-8', newline='\n')
+          py_compile.compile(str(p), doraise=True)
+          after = hashlib.sha256(p.read_bytes()).hexdigest()
+          print('Source before:', before)
+          print('Source after :', after)
+          print('Python compile: OK')
+
+          version = '5.0.0-m2.8-recovery1-hf1'
+          Path('emo/version.py').write_text(f'APP_VERSION = "{version}"\n', encoding='utf-8')
+
+          manifest_path = Path('update-package.json')
+          manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+          manifest['version'] = version
+          notes = list(manifest.get('notes') or [])
+          notes.insert(0, 'Hotfix: corrected subprocess.list2cmd1 to subprocess.list2cmdline so HandBrake can launch during encoding.')
+          manifest['notes'] = notes
+          manifest_path.write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')
+
+          release = Path('docs/releases/5.0.0-m2.8-recovery1-hf1.md')
+          release.write_text('''# EMP 5.0.0-m2.8-recovery1-hf1 — HandBrake Launch Hotfix\n\n## Release details\n\n- **Tag:** `v5.0.0-m2.8-recovery1-hf1`\n- **Release title:** **EMP 5.0.0-m2.8-recovery1-hf1 — HandBrake Launch Hotfix**\n- **Status:** Recovery test candidate; do not publish until Windows queue testing passes.\n\n## What changed\n\n- Corrected `subprocess.list2cmd1(command)` to Python's valid `subprocess.list2cmdline(command)`.\n- Restores HandBrake process launch after EMP prepares the local working copy.\n- Preserves the existing failure-safety behaviour: NAS originals are not intentionally deleted on an encode-start failure and useful local work files are retained.\n- No queue-order, encode-quality, deletion-policy, Jellyfin, UI, or tray logic was intentionally changed.\n\n## Verification\n\n- The hotfix workflow required the pre-hotfix recovered source SHA-256 to match `4b766157a58b6be7fbebd1a2a8e70c15802bbd5373d302bcbc3771631e744798`.\n- Exactly one broken call was permitted to be replaced.\n- `emo/main_window.py` was Python-compiled before commit.\n\n## Required test\n\nRun the two-file queue test again and confirm HandBrake starts and file 2 begins automatically after file 1 completes.\n''', encoding='utf-8')
+
+          changelog = Path('CHANGELOG.md')
+          current = changelog.read_text(encoding='utf-8')
+          entry = '''# Changelog\n\n## 5.0.0-m2.8-recovery1-hf1 - HandBrake Launch Hotfix\n\n- Fixed invalid `subprocess.list2cmd1` call in the recovered encoding worker.\n- HandBrake can now launch normally after the local working copy is prepared.\n- Failure safety remains unchanged: the NAS original is preserved and useful local work files may be retained after a failed encode start.\n\n'''
+          if current.startswith('# Changelog\n'):
+              current = current[len('# Changelog\n\n'):]
+          changelog.write_text(entry + current, encoding='utf-8')
+          PY
+
+          git config user.name "EMP Recovery"
+          git config user.email "actions@users.noreply.github.com"
+          git add emo/main_window.py emo/version.py update-package.json CHANGELOG.md docs/releases/5.0.0-m2.8-recovery1-hf1.md
+          git commit -m "fix: correct HandBrake command logging call"
+          git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/EvildeadNZ/EMO.git"
+          git push origin HEAD:emp-5-recovery-pr
