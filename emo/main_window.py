@@ -1632,7 +1632,7 @@ class EncodeWorker(QRunnable):
         return value
 
     def run_handbrake(self, command: list[str]) -> None:
-        log("Running: " + subprocess.list2cmd1(command))
+        log("Running: " + subprocess.list2cmdline(command))
         process = subprocess.Popen(
             command,
             stdout=subprocess.PIPE,

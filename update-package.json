@@ -1,9 +1,10 @@
 {
   "name": "Evil's Media Encoding Platform",
-  "version": "5.0.0-m2.8-recovery1",
+  "version": "5.0.0-m2.8-recovery1-hf1",
   "minimum_updater_version": "5.0.0-m2",
   "architecture": "modular",
   "notes": [
+    "Hotfix: corrected subprocess.list2cmd1 to subprocess.list2cmdline so HandBrake can launch during encoding.",
     "Recovered and hash-verified EMP 5 working baseline from the August 16 development source.",
     "Restores the multi-file queue lifetime/snapshot fix so processing continues beyond the first item.",
     "Restores process-safe close and system-tray behavior from the m2.7-hf4 lineage.",

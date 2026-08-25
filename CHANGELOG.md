@@ -1,5 +1,11 @@
 # Changelog
 
+## 5.0.0-m2.8-recovery1-hf1 - HandBrake Launch Hotfix
+
+- Fixed invalid `subprocess.list2cmd1` call in the recovered encoding worker.
+- HandBrake can now launch normally after the local working copy is prepared.
+- Failure safety remains unchanged: the NAS original is preserved and useful local work files may be retained after a failed encode start.
+
 ## 5.0.0-m2.8-recovery1 - Recovered Verified Baseline
 
 ### What changed
